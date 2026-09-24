@@ -10,6 +10,13 @@ Na počítači jde hrát klávesnicí a myší (**HRÁT NA POČÍTAČI**).
 ## Hra
 - Pohled z třetí osoby: kamera je za postavou přes pravé rameno a plynule ji sleduje.
 - Jetpack bere palivo. Na zemi se pomalu doplňuje, zelené kanystry přidají +60.
+- Jeskyně je rozlehlá (60 × 84 m) a plná krápníků: sloupy od podlahy ke stropu,
+  stalagmity a stalaktity. Příšery střílí jen tehdy, když na tebe vidí, takže za
+  sloupem jsi v bezpečí.
+- Na podlaze jsou lávová jezírka, s každou úrovní jich přibývá a rostou. Šlápnutí
+  do lávy vezme život a vymrští tě vzhůru, na lávě se nedoplňuje palivo. Start,
+  cesta k východu a kanystry jsou vždy mimo lávu, láva nikdy nezabere víc než
+  30 % podlahy.
 - V každé jeskyni je pár příšer. Když padnou všechny, otevře se modrá bariéra
   na konci. Průlet tunelem = další, těžší úroveň (víc příšer, rychlejší, od
   2. úrovně střílí).

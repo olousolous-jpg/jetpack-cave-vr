@@ -59,6 +59,7 @@ export class Sfx {
       case 'kill': this.noise(0.45, 0.45, 900); this.tone(180, 0.35, 'sawtooth', 0.2, 0.3); break;
       case 'spark': this.noise(0.04, 0.08, 3000); break;
       case 'enemyShot': this.tone(300, 0.25, 'triangle', 0.15, 1.8); break;
+      case 'lava': this.noise(0.4, 0.4, 600); break;
       case 'playerHit': this.tone(120, 0.5, 'sawtooth', 0.35, 0.5); break;
       case 'pickup': [523, 659, 784].forEach((f, i) => setTimeout(() => this.tone(f, 0.12, 'square', 0.15), i * 70)); break;
       case 'doorOpen': this.tone(220, 0.8, 'triangle', 0.25, 4); break;

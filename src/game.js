@@ -1,7 +1,7 @@
 // Vykreslení a propojení: three.js scéna, kamera z třetí osoby, WebXR, HUD, zvuky.
 import * as THREE from 'three';
 import { World, forwardOf, rightOf } from './world.js';
-import { AIR, DOOR } from './cave.js';
+import { AIR, DOOR, LAVA } from './cave.js';
 import { CFG } from './config.js';
 import { makeHero, animateHero, makeEnemy, animateEnemy, makeCanister,
          bulletGeo, bulletMat, shotGeo, shotMat } from './models.js';
@@ -14,6 +14,8 @@ const store = {
   set(k, v) { try { localStorage.setItem('jcvr.' + k, JSON.stringify(v)); } catch { /* soukromé okno */ } },
 };
 const TURN_SPEEDS = [0.6, 1.0, 1.5];
+// pixelová láva: tmavě červená → oranžová → žlutá
+const LAVA_COLORS = [0xb81800, 0xe03000, 0xff5500, 0xff7a00, 0xffa200, 0xffd040];
 
 export class Game {
   constructor(container) {
@@ -27,7 +29,7 @@ export class Game {
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x0a1440);
-    this.scene.fog = new THREE.Fog(0x0a1440, 18, 55);
+    this.scene.fog = new THREE.Fog(0x0a1440, 20, 68);
     this.scene.add(new THREE.HemisphereLight(0xa8c4ff, 0x6a4a2a, 1.7));
     const sun = new THREE.DirectionalLight(0xffe2b0, 0.6);
     sun.position.set(0.4, 1, 0.3);
@@ -169,7 +171,8 @@ export class Game {
     }
     const cave = this.world.cave;
     const cells = cave.surfaceCells();
-    const rock = cells.filter((c) => c[3] !== DOOR), door = cells.filter((c) => c[3] === DOOR);
+    const rock = cells.filter((c) => c[3] !== DOOR && c[3] !== LAVA), door = cells.filter((c) => c[3] === DOOR);
+    const lava = cells.filter((c) => c[3] === LAVA);
     const geo = new THREE.BoxGeometry(1, 1, 1);
     const rockMesh = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ color: 0xffffff }), rock.length);
     const m = new THREE.Matrix4(), col = new THREE.Color();
@@ -193,6 +196,24 @@ export class Game {
     door.forEach(([x, y, z], i) => { m.makeTranslation(x + 0.5, y + 0.5, z + 0.5); this.doorMesh.setMatrixAt(i, m); });
     this.doorMesh.count = door.length;
     this.caveGroup.add(this.doorMesh);
+    // láva: zapuštěná o kousek níž než podlaha, svítí a pulzuje (barva se mění v sync())
+    this.lavaMat = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false });
+    this.lavaMesh = new THREE.InstancedMesh(geo, this.lavaMat, Math.max(1, lava.length));
+    lava.forEach(([x, y, z], i) => {
+      m.makeTranslation(x + 0.5, y + 0.35, z + 0.5);
+      this.lavaMesh.setMatrixAt(i, m);
+      this.lavaMesh.setColorAt(i, col.setHex(LAVA_COLORS[(x * 7 + z * 13) % LAVA_COLORS.length]));
+    });
+    this.lavaMesh.count = lava.length;
+    this.caveGroup.add(this.lavaMesh);
+    this.lavaCells = lava;
+    // oranžová záře nad největšími jezírky (max 4 světla — výkon na Questu)
+    [...cave.pools].sort((a, b) => b.cells - a.cells).slice(0, 4).forEach((pool) => {
+      const l = new THREE.PointLight(0xff6a20, 2 + pool.r * 0.4, 6 + pool.r * 2.5, 1.5);
+      l.position.set(pool.x, cave.floorY + 1.2, pool.z);
+      this.caveGroup.add(l);
+    });
+    this.bubbleAt = 0;
     // modré krystaly na stěnách (osvětlení hloubky)
     const crystals = rock.filter((c, i) => (i * 2654435761 >>> 0) % 97 === 0).slice(0, 40);
     const cry = new THREE.InstancedMesh(new THREE.OctahedronGeometry(0.35, 0),
@@ -405,6 +426,24 @@ export class Game {
     place(this.bulletPool, w.bullets, true);
     place(this.shotPool, w.shots, false);
     this.doorMesh.visible = !w.doorOpen;
+    // láva pulzuje a občas z ní vyletí žhavá bublina
+    const glow = 0.85 + 0.15 * Math.sin(t * 3);
+    this.lavaMat.color.setRGB(glow, glow, glow);
+    const lc = this.lavaCells.length;
+    if (lc && this.lavaMesh.instanceColor) {
+      // „vření": pár náhodných kostek změní odstín každý snímek
+      const tmp = new THREE.Color();
+      for (let i = 0; i < Math.max(1, lc >> 4); i++) {
+        const k = Math.floor(Math.random() * lc);
+        this.lavaMesh.setColorAt(k, tmp.setHex(LAVA_COLORS[Math.floor(Math.random() * LAVA_COLORS.length)]));
+      }
+      this.lavaMesh.instanceColor.needsUpdate = true;
+    }
+    if (this.lavaCells.length && t > this.bubbleAt) {
+      this.bubbleAt = t + 0.25;
+      const [x, y, z] = this.lavaCells[Math.floor(Math.random() * this.lavaCells.length)];
+      this.burst({ x: x + 0.5, y: y + 1, z: z + 0.5 }, 0xffa030, 2, 1.5);
+    }
     // částice
     this.particles = this.particles.filter((pt) => {
       pt.life -= dt;
@@ -438,6 +477,7 @@ export class Game {
         case 'spark': this.burst(ev.pos, 0xffd060, 3, 2); break;
         case 'playerHit': this.pulse(1, 250, true);
           this.banner.show(['AU!', 'Zbývá životů: ' + ev.lives], 1.2, this.time); break;
+        case 'lava': this.pulse(1, 200, true); this.burst(ev.pos, 0xff7020, 12, 4); break;
         case 'pickup': this.banner.show(['PALIVO +' + CFG.pickup.fuel], 1.0, this.time); break;
         case 'doorOpen': this.banner.show(['PRŮCHOD OTEVŘEN!', 'Leť k modré záři na konci'], 2.5, this.time); break;
         case 'levelDone':

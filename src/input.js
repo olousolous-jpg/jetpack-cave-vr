@@ -40,14 +40,16 @@ export class Keyboard {
   constructor(dom) {
     this.keys = new Set();
     this.mouseDX = 0; this.mouseDY = 0; this.mouseDown = false;
+    this.latched = new Set();     // krátký stisk se nesmí ztratit mezi snímky
     addEventListener('keydown', (e) => {
       this.keys.add(e.code);
+      this.latched.add(e.code);
       if (['Space', 'ArrowUp', 'ArrowDown'].includes(e.code)) e.preventDefault();
     });
     addEventListener('keyup', (e) => this.keys.delete(e.code));
     addEventListener('blur', () => this.keys.clear());
     dom.addEventListener('mousedown', (e) => {
-      if (e.button === 0) this.mouseDown = true;
+      if (e.button === 0) { this.mouseDown = true; this.clicked = true; }
       if (document.pointerLockElement !== dom) dom.requestPointerLock?.();
     });
     addEventListener('mouseup', (e) => { if (e.button === 0) this.mouseDown = false; });
@@ -57,7 +59,7 @@ export class Keyboard {
   }
 
   read(dt) {
-    const k = (c) => this.keys.has(c);
+    const k = (c) => this.keys.has(c) || this.latched.has(c);
     const moveX = (k('KeyD') ? 1 : 0) - (k('KeyA') ? 1 : 0);
     const moveY = (k('KeyW') ? 1 : 0) - (k('KeyS') ? 1 : 0);
     // myš: pixely → „vychýlení páčky" (turnSpeed rad/s)
@@ -65,11 +67,14 @@ export class Keyboard {
     const turn = (k('ArrowRight') || k('KeyE') ? 1 : 0) - (k('ArrowLeft') || k('KeyQ') ? 1 : 0) + mouseTurn;
     const pitch = ((k('ArrowUp') ? 1 : 0) - (k('ArrowDown') ? 1 : 0)) * 1.2 * dt - this.mouseDY * 0.0025;
     this.mouseDX = 0; this.mouseDY = 0;
-    return {
+    const fireClick = this.clicked; this.clicked = false;
+    const out = {
       moveX, moveY, turn, pitch,
       thrust: k('Space') ? 1 : 0,
-      fire: this.mouseDown || k('KeyF'),
+      fire: this.mouseDown || fireClick || k('KeyF'),
       start: k('Enter'),
     };
+    this.latched.clear();
+    return out;
   }
 }

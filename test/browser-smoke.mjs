@@ -43,12 +43,18 @@ try {
   await page.evaluate(() => { const w = window.__game.world; w.player.pos.z = w.cave.exitZ + 0.5; w.player.pos.x = w.cave.nx / 2; w.player.pos.y = w.cave.floorY; });
   await page.waitForTimeout(300);
   await page.screenshot({ path: 'test/shots/4-cleared.png' });
-  await page.waitForTimeout(1300);
+  await page.waitForFunction(() => { const g = window.__game; return g.world.state === 'cleared' && g.time > g.clearedAt + 1.4; }, null, { timeout: 30000 });
   await page.keyboard.press('Enter');
   await page.waitForTimeout(600);
   const st2 = await page.evaluate(() => ({ state: window.__game.world.state, level: window.__game.world.level }));
   console.log('po Enteru:', JSON.stringify(st2));
   await page.screenshot({ path: 'test/shots/5-level2.png' });
+  // 5. úroveň: víc lávy a krápníků — snímek z výšky nad jezírkem
+  await page.evaluate(() => { const g = window.__game, w = g.world; for (let i = 0; i < 3; i++) w.nextLevel();
+    g.buildLevel(); const pool = w.cave.pools[0]; w.player.invuln = 0.01;
+    if (pool) { w.player.pos = { x: pool.x, y: w.cave.floorY + 5, z: pool.z - 7 }; } g.snapCamera(); g.banner.hide(); });
+  await page.keyboard.down('Space'); await page.waitForTimeout(1500); await page.keyboard.up('Space');
+  await page.screenshot({ path: 'test/shots/6-level5-lava.png' });
   if (st2.level !== 2 || st2.state !== 'playing') errors.push('přechod do 2. úrovně selhal: ' + JSON.stringify(st2));
 } finally {
   await browser.close();

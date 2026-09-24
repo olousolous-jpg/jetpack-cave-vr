@@ -117,6 +117,14 @@ export class World {
     p.vel.y = Math.max(-P.maxFall, Math.min(P.maxRise, p.vel.y));
     const res = moveBox(this.cave, p.pos, p.vel, { w: P.w, h: P.h }, dt);
     p.onGround = res.onGround;
+    p.onLava = p.onGround && this.touchingLava();
+    if (p.onLava) {
+      // láva: vymrštění vzhůru a (mimo ochrannou dobu) ztráta života
+      p.vel.y = CFG.lava.bounce;
+      p.onGround = false;
+      this.emit('lava', { pos: { ...p.pos } });
+      this.hurtPlayer(true);
+    }
     if (p.onGround && !p.thrusting) p.fuel = Math.min(P.fuelMax, p.fuel + P.fuelRegen * dt);
     if (p.invuln > 0) p.invuln -= dt;
 
@@ -127,6 +135,14 @@ export class World {
       p.cooldown = CFG.gun.cooldown;
       this.fire();
     }
+  }
+
+  // stojí hráč (kteroukoli částí chodidel) na lávě?
+  touchingLava() {
+    const p = this.player, hw = P.w / 2 - 0.02, y = p.pos.y - 0.05;
+    for (const dx of [-hw, hw]) for (const dz of [-hw, hw])
+      if (this.cave.lavaAt(p.pos.x + dx, y, p.pos.z + dz)) return true;
+    return false;
   }
 
   gunMuzzle() {
@@ -195,7 +211,7 @@ export class World {
       if (e.hitFlash > 0) e.hitFlash -= dt;
       const toP = sub(center, e.pos);
       const dist = len(toP);
-      if (!e.awake && dist < 16) e.awake = true;
+      if (!e.awake && dist < E.wakeDist) e.awake = true;
       let target;
       if (!e.awake) {
         target = { x: e.pos.x, y: e.pos.y + Math.sin(t * 1.5 + e.phase) * 0.3, z: e.pos.z };
@@ -219,7 +235,9 @@ export class World {
       if (dist < E.contactDist) this.hurtPlayer();
       if (e.shooter && e.awake) {
         e.shotTimer -= dt;
-        if (e.shotTimer <= 0 && dist < 18) {
+        // střílí jen s výhledem na hráče — za sloupem je hráč v bezpečí
+        if (e.shotTimer <= 0 && dist < 22 &&
+            !this.cave.raycast(e.pos.x, e.pos.y, e.pos.z, center.x, center.y, center.z, 0.3)) {
           e.shotTimer = this.rng.range(...E.shotEvery);
           const dir = norm(toP);
           this.shots.push({ pos: { ...e.pos }, vel: { x: dir.x * E.shotSpeed, y: dir.y * E.shotSpeed, z: dir.z * E.shotSpeed }, life: 4 });
@@ -242,7 +260,7 @@ export class World {
     }
   }
 
-  hurtPlayer() {
+  hurtPlayer(fromLava = false) {
     const p = this.player;
     if (p.invuln > 0 || this.state !== 'playing') return;
     p.lives -= 1;
@@ -251,7 +269,7 @@ export class World {
     if (p.lives <= 0) {
       this.state = 'gameover';
       this.emit('gameOver', { score: this.score });
-    } else {
+    } else if (!fromLava) {
       // odhoď hráče kousek zpět a nahoru
       const f = forwardOf(p.yaw);
       p.vel.x = -f.x * 6; p.vel.z = -f.z * 6; p.vel.y = 4;

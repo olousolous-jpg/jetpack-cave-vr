@@ -134,3 +134,80 @@ test('ovladače Questu: levá páčka pohyb, pravá otáčení, spouště jetpac
   assert.equal(idle.moveX, 0, 'mrtvá zóna');
   assert.equal(idle.moveY, 0);
 });
+
+import { LAVA, ROCK } from '../src/cave.js';
+
+test('jeskyně: rozlehlá, se sloupy k úkrytu', () => {
+  const c = new Cave(1, 42);
+  assert.ok(c.nx >= 60 && c.nz >= 80);
+  const cols = c.pillars.filter((p) => p.kind === 'sloup');
+  assert.ok(cols.length >= 5, 'aspoň 5 sloupů od podlahy ke stropu');
+  for (const p of cols) {
+    const x = Math.floor(p.x), z = Math.floor(p.z);
+    assert.equal(c.get(x, c.floorY, z), ROCK, 'sloup stojí na podlaze');
+  }
+});
+
+test('láva: s úrovní roste, nikdy u startu, u východu ani pod kanystrem, max 30 % podlahy', () => {
+  const lavaOf = (lvl) => { let n = 0; for (let s = 1; s <= 5; s++) n += new Cave(lvl, s * 11).lavaCells; return n; };
+  assert.ok(lavaOf(1) > 0, 'láva už v 1. úrovni');
+  assert.ok(lavaOf(4) > lavaOf(1) * 2, 've 4. úrovni víc lávy');
+  assert.ok(lavaOf(8) > lavaOf(4), 'v 8. úrovni ještě víc');
+  for (const lvl of [1, 5, 12]) {
+    const c = new Cave(lvl, 3);
+    const s = c.spawn;
+    let floor = 0;
+    for (let z = c.chamberZ0; z < c.chamberZ1; z++)
+      for (let x = 1; x < c.nx - 1; x++) {
+        if (c.get(x, c.floorY, z) === 0) floor++;
+        if (c.get(x, c.floorY - 1, z) !== LAVA) continue;
+        assert.ok(Math.hypot(x + 0.5 - s.x, z + 0.5 - s.z) >= 6, 'láva u startu');
+        assert.ok(!(z > c.chamberZ1 - 8 && Math.abs(x - s.x) < 5), 'láva na cestě k východu');
+      }
+    assert.ok(c.lavaCells <= floor * 0.3 + 1);
+  }
+  const w = new World(5); w.newGame(); w.nextLevel(); w.nextLevel(); w.nextLevel();
+  for (const k of w.pickups)
+    assert.equal(w.cave.get(Math.floor(k.pos.x), w.cave.floorY - 1, Math.floor(k.pos.z)), ROCK, 'kanystr není na lávě');
+});
+
+test('láva: šlápnutí vezme život a vymrští hráče nahoru', () => {
+  const w = new World(9); w.newGame();
+  for (let i = 0; i < 4; i++) w.nextLevel();
+  w.enemies.forEach((e) => { e.hp = 0; });
+  const c = w.cave;
+  let spot = null;
+  for (let z = c.chamberZ0; z < c.chamberZ1 && !spot; z++)
+    for (let x = 1; x < c.nx - 1 && !spot; x++)
+      if (c.get(x, c.floorY - 1, z) === LAVA && c.get(x + 1, c.floorY - 1, z) === LAVA &&
+          c.get(x, c.floorY - 1, z + 1) === LAVA && c.get(x + 1, c.floorY - 1, z + 1) === LAVA) spot = { x: x + 1, z: z + 1 };
+  assert.ok(spot, 'v 5. úrovni je jezírko');
+  w.player.invuln = 0;
+  w.player.pos = { x: spot.x, y: c.floorY + 0.5, z: spot.z };
+  w.player.vel = { x: 0, y: -2, z: 0 };
+  const lives = w.player.lives;
+  step(w, {}, 0.3);
+  assert.equal(w.player.lives, lives - 1);
+  assert.ok(w.player.pos.y > c.floorY + 0.5, 'vymrštěn vzhůru');
+});
+
+test('příšera za sloupem nestřílí, s výhledem ano', () => {
+  const w = new World(21); w.newGame(); w.nextLevel();   // od 2. úrovně se střílí
+  const c = w.cave;
+  const col = c.pillars.find((p) => p.kind === 'sloup' && p.r > 1.5) || c.pillars.find((p) => p.kind === 'sloup');
+  assert.ok(col);
+  const e = w.enemies[0];
+  w.enemies.slice(1).forEach((x) => { x.hp = 0; });
+  Object.assign(e, { shooter: true, awake: true, speed: 0 });
+  const behind = { x: col.x, y: c.floorY + 2, z: col.z + col.r + 3 };
+  const place = (ez) => { e.pos = { x: col.x, y: c.floorY + 1.8, z: ez }; e.vel = { x: 0, y: 0, z: 0 }; };
+  w.player.pos = { x: behind.x, y: c.floorY, z: col.z - col.r - 3 };
+  w.player.invuln = 99;
+  let shots = 0;
+  for (let i = 0; i < 120; i++) { place(behind.z); e.shotTimer = 0; w.events.length = 0; now += 1 / 60; w.update({}, 1 / 60);
+    shots += w.events.filter((x) => x.type === 'enemyShot').length; }
+  assert.equal(shots, 0, 'přes sloup nestřílí');
+  for (let i = 0; i < 30; i++) { e.pos = { x: w.player.pos.x + 4, y: c.floorY + 1.8, z: w.player.pos.z }; e.shotTimer = 0;
+    w.events.length = 0; now += 1 / 60; w.update({}, 1 / 60); shots += w.events.filter((x) => x.type === 'enemyShot').length; }
+  assert.ok(shots > 0, 's výhledem střílí');
+});
