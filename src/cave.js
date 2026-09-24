@@ -3,13 +3,14 @@
 // Každá úroveň = jedna velká komora (protáhlá dutina se zvlněnými stěnami)
 // + tunel na konci, zatarasený dveřmi. Dveře zmizí, až padnou všichni nepřátelé.
 import { makeRng, makeNoise3 } from './rng.js';
+import { CFG } from './config.js';
 
 export const AIR = 0, ROCK = 1, DOOR = 2, LAVA = 3;
 
 export class Cave {
   constructor(level, seed = 1234) {
     this.level = level;
-    this.nx = 60; this.ny = 24; this.nz = 84;
+    ({ nx: this.nx, ny: this.ny, nz: this.nz } = CFG.cave);
     this.cells = new Uint8Array(this.nx * this.ny * this.nz).fill(ROCK);
     this.rng = makeRng(seed + level * 7919);
     this.noise = makeNoise3(seed + level * 104729);
@@ -27,19 +28,21 @@ export class Cave {
   lavaAt(px, py, pz) { return this.get(Math.floor(px), Math.floor(py), Math.floor(pz)) === LAVA; }
 
   carve() {
-    const { nx, ny, nz, noise } = this;
-    const cx = nx / 2, cy = ny * 0.45;
-    // komora: rozlehlá dutina od z=3 do z=nz-10, šířka a výška se mění podél délky
+    const { nx, nz, noise } = this;
+    const cx = nx / 2;
+    this.floorY = 3;
+    // obrovská síň: průřez je klenba (půlelipsa) na rovné podlaze, šířka i výška
+    // se podél délky mění — uprostřed až ~100 m široká a ~38 m vysoká
     this.chamberZ0 = 3; this.chamberZ1 = nz - 10;
     for (let z = this.chamberZ0; z < this.chamberZ1; z++) {
       const t = (z - this.chamberZ0) / (this.chamberZ1 - this.chamberZ0);
-      const bulge = Math.sin(t * Math.PI) ** 0.6;
-      const rx = 9 + 17 * bulge + 2.5 * noise(z * 0.12, 3.1, 0);
-      const ry = 5.5 + 5.5 * bulge + 1.2 * noise(z * 0.12, 7.7, 0);
-      for (let y = 1; y < ny - 1; y++) {
+      const bulge = Math.sin(t * Math.PI) ** 0.5;
+      const rx = 14 + 36 * bulge + 3 * noise(z * 0.08, 3.1, 0);
+      const hz = 10 + 26 * bulge + 3 * noise(z * 0.08, 7.7, 0);
+      for (let y = this.floorY; y < this.ny - 1; y++) {
         for (let x = 1; x < nx - 1; x++) {
-          const dx = (x + 0.5 - cx) / rx, dy = (y + 0.5 - cy) / ry;
-          const n = 0.25 * noise(x * 0.18, y * 0.18, z * 0.18);
+          const dx = (x + 0.5 - cx) / rx, dy = (y + 0.5 - this.floorY) / hz;
+          const n = 0.22 * noise(x * 0.12, y * 0.12, z * 0.12);
           if (dx * dx + dy * dy < 1 + n) this.set(x, y, z, AIR);
         }
       }
@@ -81,24 +84,26 @@ export class Cave {
     const s = this.spawn;
     if (Math.hypot(x - s.x, z - s.z) < 6 + margin) return false;
     if (z > this.chamberZ1 - 8 - margin && Math.abs(x - s.x) < 5 + margin) return false;
-    return this.get(Math.floor(x), this.floorY, Math.floor(z)) === AIR &&
-           this.get(Math.floor(x), this.floorY - 1, Math.floor(z)) === ROCK;
+    const fx = Math.floor(x), fz = Math.floor(z);
+    // nad lávou i krápníkem musí být dost místa (z lávy se vyletí vzhůru)
+    return this.get(fx, this.floorY, fz) === AIR && this.get(fx, this.floorY - 1, fz) === ROCK &&
+           this.ceilingAt(fx, fz) - this.floorY >= 6;
   }
 
   // krápníky: sloupy od podlahy ke stropu (úkryt), stalagmity a stalaktity
   carvePillars() {
-    const want = Math.min(28, 16 + 2 * this.level);
+    const want = CFG.cave.pillars(this.level);
     for (let tries = 0; tries < 400 && this.pillars.length < want; tries++) {
-      const px = this.rng.range(4, this.nx - 5), pz = this.rng.range(this.chamberZ0 + 12, this.chamberZ1 - 6);
-      if (!this.freeFloor(px, pz, 1)) continue;
-      if (this.pillars.some((p) => Math.hypot(p.x - px, p.z - pz) < p.r + 4)) continue;
+      const px = this.rng.range(8, this.nx - 9), pz = this.rng.range(this.chamberZ0 + 16, this.chamberZ1 - 8);
+      if (!this.freeFloor(px, pz, 2)) continue;
+      if (this.pillars.some((p) => Math.hypot(p.x - px, p.z - pz) < p.r + 10)) continue;
       const top = this.ceilingAt(Math.floor(px), Math.floor(pz));
       const height = top - this.floorY;
       if (height < 5) continue;
       const roll = this.rng();
-      const kind = roll < 0.45 ? 'sloup' : roll < 0.75 ? 'stalagmit' : 'stalaktit';
-      const r = kind === 'sloup' ? this.rng.range(1.2, 2.3) : this.rng.range(0.9, 1.8);
-      const len = kind === 'sloup' ? height : Math.min(height - 3, this.rng.int(3, 8));
+      const kind = roll < 0.6 ? 'sloup' : roll < 0.8 ? 'stalagmit' : 'stalaktit';
+      const r = kind === 'sloup' ? this.rng.range(1.8, 3.2) : this.rng.range(1.2, 2.4);
+      const len = kind === 'sloup' ? height : Math.min(height - 4, this.rng.int(5, 14));
       this.pillars.push({ x: px, z: pz, r, kind });
       for (let i = 0; i < len; i++) {
         const y = kind === 'stalaktit' ? top - 1 - i : this.floorY + i;
@@ -115,8 +120,8 @@ export class Cave {
 
   // lávová jezírka v horní vrstvě podlahy; s úrovní jich přibývá a rostou
   carveLava() {
-    const count = Math.min(9, 1 + this.level);
-    const radius = Math.min(5.5, 1.2 + 0.55 * this.level);
+    const count = Math.min(16, 1 + Math.round(this.level * 1.5));
+    const radius = Math.min(9, 1.5 + 0.8 * this.level);
     let floorCells = 0;
     for (let z = this.chamberZ0; z < this.chamberZ1; z++)
       for (let x = 1; x < this.nx - 1; x++)
@@ -124,7 +129,7 @@ export class Cave {
     const maxLava = floorCells * 0.3;       // podlaha nikdy nezmizí celá
     let lava = 0;
     for (let tries = 0; tries < 300 && this.pools.length < count; tries++) {
-      const px = this.rng.range(5, this.nx - 6), pz = this.rng.range(this.chamberZ0 + 12, this.chamberZ1 - 8);
+      const px = this.rng.range(8, this.nx - 9), pz = this.rng.range(this.chamberZ0 + 12, this.chamberZ1 - 8);
       const r = radius * this.rng.range(0.7, 1.2);
       if (!this.freeFloor(px, pz, r)) continue;
       const cells = [];

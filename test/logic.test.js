@@ -92,7 +92,7 @@ test('boj: střela zabije příšeru, po zabití všech se otevřou dveře, prů
   assert.equal(w.state, 'cleared');
   w.nextLevel();
   assert.equal(w.level, 2);
-  assert.equal(w.enemies.length, 4);
+  assert.equal(w.enemies.length, 3 + 2, 've 2. úrovni 5 příšer');
 });
 
 test('zásahy: kontakt s příšerou ubere život, pak chvíli nesmrtelnost, 0 životů = konec', () => {
@@ -137,15 +137,19 @@ test('ovladače Questu: levá páčka pohyb, pravá otáčení, spouště jetpac
 
 import { LAVA, ROCK } from '../src/cave.js';
 
-test('jeskyně: rozlehlá, se sloupy k úkrytu', () => {
+test('jeskyně: obrovská síň, krápníků s úrovní ubývá (1. úroveň 5, od 6. žádné)', () => {
   const c = new Cave(1, 42);
-  assert.ok(c.nx >= 60 && c.nz >= 80);
-  const cols = c.pillars.filter((p) => p.kind === 'sloup');
-  assert.ok(cols.length >= 5, 'aspoň 5 sloupů od podlahy ke stropu');
-  for (const p of cols) {
-    const x = Math.floor(p.x), z = Math.floor(p.z);
-    assert.equal(c.get(x, c.floorY, z), ROCK, 'sloup stojí na podlaze');
-  }
+  assert.ok(c.nx >= 100 && c.nz >= 140, 'rozměry');
+  let maxH = 0;
+  for (let z = c.chamberZ0; z < c.chamberZ1; z += 5) maxH = Math.max(maxH, c.ceilingAt(Math.floor(c.nx / 2), z) - c.floorY);
+  assert.ok(maxH >= 30, 'strop aspoň 30 m nad podlahou (je ' + maxH + ')');
+  assert.equal(c.pillars.length, 5);
+  const counts = [1, 2, 3, 4, 5, 6, 8, 12].map((l) => new Cave(l, 42).pillars.length);
+  for (let i = 1; i < counts.length; i++) assert.ok(counts[i] <= counts[i - 1], 'neubývají: ' + counts);
+  assert.equal(new Cave(6, 42).pillars.length, 0);
+  assert.equal(new Cave(12, 42).pillars.length, 0);
+  for (const p of c.pillars.filter((p) => p.kind === 'sloup'))
+    assert.equal(c.get(Math.floor(p.x), c.floorY, Math.floor(p.z)), ROCK, 'sloup stojí na podlaze');
 });
 
 test('láva: s úrovní roste, nikdy u startu, u východu ani pod kanystrem, max 30 % podlahy', () => {
@@ -163,6 +167,7 @@ test('láva: s úrovní roste, nikdy u startu, u východu ani pod kanystrem, max
         if (c.get(x, c.floorY - 1, z) !== LAVA) continue;
         assert.ok(Math.hypot(x + 0.5 - s.x, z + 0.5 - s.z) >= 6, 'láva u startu');
         assert.ok(!(z > c.chamberZ1 - 8 && Math.abs(x - s.x) < 5), 'láva na cestě k východu');
+        assert.ok(c.ceilingAt(x, z) - c.floorY >= 6, 'nad lávou je místo k vyletění');
       }
     assert.ok(c.lavaCells <= floor * 0.3 + 1);
   }

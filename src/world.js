@@ -51,9 +51,9 @@ export class World {
     this.shots = [];                 // střely nepřátel
     this.enemies = [];
     const E = CFG.enemy;
-    const count = 2 + n;
+    const count = 3 + n;
     for (let i = 0; i < count; i++) {
-      const s = this.cave.randomAirSpot(this.cave.chamberZ0 + 14, this.cave.chamberZ1 - 3, 1);
+      const s = this.cave.randomAirSpot(this.cave.chamberZ0 + 20, this.cave.chamberZ1 - 5, 1);
       if (!s) continue;
       this.enemies.push({
         id: i, pos: s, vel: { x: 0, y: 0, z: 0 }, hp: E.hp,
@@ -220,7 +220,10 @@ export class World {
         const ang = t * 0.5 + e.phase;
         const lunge = Math.sin(t * 0.35 + e.phase * 2) > 0.75;
         const rad = lunge ? 0.5 : e.orbit;
-        target = { x: center.x + Math.cos(ang) * rad, y: center.y + 1.0 + Math.sin(t + e.phase) * 1.2,
+        // v obrovské síni létají i vysoko nad hráčem a pod ním — plný 3D prostor
+        const floor = this.cave.floorY + 1.2;
+        target = { x: center.x + Math.cos(ang) * rad,
+                   y: Math.max(floor, center.y + 2 + Math.sin(t * 0.6 + e.phase) * 5),
                    z: center.z + Math.sin(ang) * rad };
       }
       const d = sub(target, e.pos);

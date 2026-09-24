@@ -37,6 +37,11 @@ try {
              score: w.score, enemies: w.enemiesLeft, fps: window.__game.renderer.info.render.frame };
   });
   console.log('stav po letu:', JSON.stringify(st));
+  const perf = await page.evaluate(() => { const g = window.__game; const t0 = performance.now(); g.buildLevel();
+    const ms = performance.now() - t0; g.renderer.render(g.scene, g.camera);
+    return { buildMs: Math.round(ms), triangles: g.renderer.info.render.triangles, calls: g.renderer.info.render.calls }; });
+  console.log('výkon:', JSON.stringify(perf));
+  if (perf.triangles > 250000) errors.push('moc trojúhelníků na snímek: ' + perf.triangles);
   // simulace dokončení úrovně: zabij příšery, přesuň hráče k východu
   await page.evaluate(() => { const w = window.__game.world; w.enemies.forEach((e) => (e.hp = 0)); });
   await page.waitForTimeout(300);

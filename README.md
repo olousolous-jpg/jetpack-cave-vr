@@ -10,9 +10,11 @@ Na počítači jde hrát klávesnicí a myší (**HRÁT NA POČÍTAČI**).
 ## Hra
 - Pohled z třetí osoby: kamera je za postavou přes pravé rameno a plynule ji sleduje.
 - Jetpack bere palivo. Na zemi se pomalu doplňuje, zelené kanystry přidají +60.
-- Jeskyně je rozlehlá (60 × 84 m) a plná krápníků: sloupy od podlahy ke stropu,
-  stalagmity a stalaktity. Příšery střílí jen tehdy, když na tebe vidí, takže za
-  sloupem jsi v bezpečí.
+- Jeskyně je obrovská síň: až ~100 m široká, ~38 m vysoká a 140 m dlouhá.
+  Příšery létají v celém prostoru, nad hráčem i pod ním.
+- Krápníků je málo a s úrovní ubývají: v 1. úrovni 5 (hlavně sloupy od podlahy
+  ke stropu), od 6. úrovně žádné, takže se není za čím schovat. Příšery střílí
+  jen s výhledem na hráče. Počet jde změnit v `src/config.js` (`cave.pillars`).
 - Na podlaze jsou lávová jezírka, s každou úrovní jich přibývá a rostou. Šlápnutí
   do lávy vezme život a vymrští tě vzhůru, na lávě se nedoplňuje palivo. Start,
   cesta k východu a kanystry jsou vždy mimo lávu, láva nikdy nezabere víc než
@@ -50,6 +52,7 @@ jde zpomalit tlačítkem Y. Kamera se nenaklání a neotáčí sama od sebe.
 - Čisté HTML + JavaScript moduly, bez sestavování. Knihovna [three.js](https://threejs.org)
   (MIT) je přibalená ve `vendor/`.
 - `src/world.js`, `cave.js`, `physics.js`: herní logika bez vykreslování (testuje se v Node).
+- `src/cavemesh.js`: jeskyně jako jeden model jen z viditelných stěn kostek (~85 tisíc trojúhelníků).
 - `src/game.js`: scéna, kamera, WebXR ovladače, HUD, efekty. `src/models.js`: kostičkové modely.
 - `src/input.js`: mapování ovladačů Questu a klávesnice. `src/audio.js`: syntetizované zvuky.
 - Nastavení ladění (rychlosti, palivo, kamera) je v `src/config.js`.

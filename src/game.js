@@ -6,6 +6,7 @@ import { CFG } from './config.js';
 import { makeHero, animateHero, makeEnemy, animateEnemy, makeCanister,
          bulletGeo, bulletMat, shotGeo, shotMat } from './models.js';
 import { Hud, Banner } from './hud.js';
+import { buildCaveGeometry } from './cavemesh.js';
 import { Keyboard, mapXRSources } from './input.js';
 import { Sfx } from './audio.js';
 
@@ -29,7 +30,7 @@ export class Game {
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x0a1440);
-    this.scene.fog = new THREE.Fog(0x0a1440, 20, 68);
+    this.scene.fog = new THREE.Fog(0x0a1440, 35, 150);
     this.scene.add(new THREE.HemisphereLight(0xa8c4ff, 0x6a4a2a, 1.7));
     const sun = new THREE.DirectionalLight(0xffe2b0, 0.6);
     sun.position.set(0.4, 1, 0.3);
@@ -38,10 +39,10 @@ export class Game {
     // rig = „vozík" s kamerou; ve VR s ním jezdí hlava hráče
     this.rig = new THREE.Group();
     this.scene.add(this.rig);
-    this.camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 120);
+    this.camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 220);
     this.rig.add(this.camera);
     // „lucerna“ u kamery: prosvítí nejbližší stěny, dál zůstává modrá hloubka
-    this.lantern = new THREE.PointLight(0xfff0d8, 2.2, 20, 1.2);
+    this.lantern = new THREE.PointLight(0xfff0d8, 2.4, 26, 1.1);
     this.scene.add(this.lantern);
 
     this.world = new World();
@@ -174,21 +175,9 @@ export class Game {
     const rock = cells.filter((c) => c[3] !== DOOR && c[3] !== LAVA), door = cells.filter((c) => c[3] === DOOR);
     const lava = cells.filter((c) => c[3] === LAVA);
     const geo = new THREE.BoxGeometry(1, 1, 1);
-    const rockMesh = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ color: 0xffffff }), rock.length);
     const m = new THREE.Matrix4(), col = new THREE.Color();
-    const palette = [0x8a5628, 0xa0662e, 0xb87a36, 0xd09444, 0xf0bc58, 0x6a4220];
-    rock.forEach(([x, y, z], i) => {
-      m.makeTranslation(x + 0.5, y + 0.5, z + 0.5);
-      rockMesh.setMatrixAt(i, m);
-      // světlejší (zlatavé) kostky tam, kde je nad nimi vzduch — hrany jako v návrhu
-      const top = cave.get(x, y + 1, z) === AIR;
-      const h = ((x * 73856093) ^ (y * 19349663) ^ (z * 83492791)) >>> 0;
-      let c = palette[h % 4];
-      if (top && h % 3 === 0) c = palette[4];
-      if (!top && h % 7 === 0) c = palette[5];
-      col.setHex(c);
-      rockMesh.setColorAt(i, col);
-    });
+    // skála: jeden model jen z viditelných stěn (viz cavemesh.js)
+    const rockMesh = new THREE.Mesh(buildCaveGeometry(cave), new THREE.MeshLambertMaterial({ vertexColors: true }));
     this.caveGroup.add(rockMesh);
     // energetická bariéra ve dveřích
     this.doorMesh = new THREE.InstancedMesh(geo, new THREE.MeshBasicMaterial({
@@ -215,8 +204,8 @@ export class Game {
     });
     this.bubbleAt = 0;
     // modré krystaly na stěnách (osvětlení hloubky)
-    const crystals = rock.filter((c, i) => (i * 2654435761 >>> 0) % 97 === 0).slice(0, 40);
-    const cry = new THREE.InstancedMesh(new THREE.OctahedronGeometry(0.35, 0),
+    const crystals = rock.filter((c, i) => (i * 2654435761 >>> 0) % 97 === 0 && cave.get(c[0], c[1] + 1, c[2]) === AIR).slice(0, 40);
+    const cry = new THREE.InstancedMesh(new THREE.OctahedronGeometry(0.6, 0),
       new THREE.MeshBasicMaterial({ color: 0x4fb4ff }), Math.max(1, crystals.length));
     crystals.forEach(([x, y, z], i) => {
       m.makeTranslation(x + 0.5, y + 1.0, z + 0.5);
