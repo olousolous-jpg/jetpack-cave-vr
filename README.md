@@ -1,0 +1,57 @@
+# Jetpack Cave VR
+
+Kostičková jeskyně, jetpack na zádech a fialové příšery. WebXR hra pro **Meta
+Quest 3**, která běží přímo v prohlížeči. Nic se neinstaluje.
+
+**Hrát:** na Questu otevři v prohlížeči adresu
+`https://olousolous-jpg.github.io/jetpack-cave-vr/` a klepni na **VSTOUPIT DO VR**.
+Na počítači jde hrát klávesnicí a myší (**HRÁT NA POČÍTAČI**).
+
+## Hra
+- Pohled z třetí osoby: kamera je za postavou přes pravé rameno a plynule ji sleduje.
+- Jetpack bere palivo. Na zemi se pomalu doplňuje, zelené kanystry přidají +60.
+- V každé jeskyni je pár příšer. Když padnou všechny, otevře se modrá bariéra
+  na konci. Průlet tunelem = další, těžší úroveň (víc příšer, rychlejší, od
+  2. úrovně střílí).
+- 3 životy, skóre a nejlepší skóre (uloží se v prohlížeči).
+
+## Ovládání
+| Quest 3 | Akce |
+|---|---|
+| levá páčka | plynulý pohyb |
+| pravá páčka | plynulé otáčení |
+| levá spoušť / grip | jetpack (síla podle stisku) |
+| pravá spoušť | střelba, míří se pravým ovladačem (laser) |
+| A | start / další úroveň |
+| B | zapnout / vypnout ztmavení okrajů při pohybu |
+| Y | rychlost otáčení (pomalé / střední / rychlé) |
+
+| Počítač | Akce |
+|---|---|
+| W A S D | pohyb |
+| myš (po kliknutí do hry), ← → | otáčení |
+| myš nahoru/dolů, ↑ ↓ | míření |
+| mezerník | jetpack |
+| levé tlačítko, F | střelba |
+| Enter | další úroveň / nová hra |
+
+**Pohodlí ve VR:** plynulé otáčení a let můžou některým lidem dělat nevolno.
+Hra proto při pohybu ztmaví okraje obrazu (vypíná se tlačítkem B) a otáčení
+jde zpomalit tlačítkem Y. Kamera se nenaklání a neotáčí sama od sebe.
+
+## Jak je to postavené
+- Čisté HTML + JavaScript moduly, bez sestavování. Knihovna [three.js](https://threejs.org)
+  (MIT) je přibalená ve `vendor/`.
+- `src/world.js`, `cave.js`, `physics.js`: herní logika bez vykreslování (testuje se v Node).
+- `src/game.js`: scéna, kamera, WebXR ovladače, HUD, efekty. `src/models.js`: kostičkové modely.
+- `src/input.js`: mapování ovladačů Questu a klávesnice. `src/audio.js`: syntetizované zvuky.
+- Nastavení ladění (rychlosti, palivo, kamera) je v `src/config.js`.
+
+## Vývoj
+```bash
+python3 -m http.server 8000          # pak http://localhost:8000
+npm test                             # testy logiky (Node 18+)
+node test/browser-smoke.mjs          # hra v prohlížeči (Playwright + Chromium)
+node test/vr-smoke.mjs               # VR v emulátoru Quest 3 (IWER, Meta, MIT)
+```
+WebXR vyžaduje HTTPS. Na Questu proto testuj přes GitHub Pages, ne přes IP adresu počítače.

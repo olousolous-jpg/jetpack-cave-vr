@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <title>Jetpack Cave VR</title>
+  <meta name="description" content="Kostičková jeskyně, jetpack a fialové příšery — WebXR hra pro Meta Quest 3.">
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #0a1440; color: #e8ecff;
+                 font-family: "Courier New", monospace; }
+    #app canvas { display: block; }
+    #hud { position: fixed; left: 50%; bottom: 12px; transform: translateX(-50%);
+           width: min(440px, 70vw); image-rendering: pixelated; pointer-events: none; display: none; }
+    #banner { position: fixed; left: 50%; top: 3%; transform: translateX(-50%);
+              width: min(520px, 80vw); pointer-events: none; display: none; }
+    #crosshair { position: fixed; left: 50%; top: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px;
+                 border: 2px solid #ffe066; border-radius: 50%; pointer-events: none; display: none; }
+    body.playing #hud, body.playing #crosshair { display: block; }
+    body.vr #hud, body.vr #crosshair, body.vr #banner { display: none !important; }
+    #intro { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+             background: radial-gradient(ellipse at center, rgba(20,30,90,.85), rgba(5,8,25,.95)); }
+    #intro.hidden { display: none; }
+    .card { max-width: 640px; margin: 16px; padding: 28px 32px; border: 4px solid #ffd84a;
+            background: rgba(10,8,30,.9); box-shadow: 0 0 40px rgba(80,120,255,.35); }
+    h1 { margin: 0 0 6px; color: #ffd84a; font-size: clamp(28px, 6vw, 46px); letter-spacing: 2px; }
+    .sub { color: #9fe8ff; margin: 0 0 18px; }
+    #buttons { display: flex; gap: 14px; flex-wrap: wrap; margin: 18px 0; }
+    #buttons button, #vr-button { position: static !important; transform: none !important; left: auto !important;
+             bottom: auto !important; width: auto !important; padding: 14px 22px !important; font: bold 18px "Courier New", monospace !important;
+             border: 3px solid #ffd84a !important; background: #2a1a5e !important; color: #ffd84a !important;
+             border-radius: 0 !important; cursor: pointer; opacity: 1 !important; }
+    #buttons button:hover { background: #3d2a85 !important; }
+    table { border-collapse: collapse; font-size: 15px; width: 100%; }
+    td { padding: 3px 8px; border-bottom: 1px solid #2a2f6a; vertical-align: top; }
+    td:first-child { color: #ffd84a; white-space: nowrap; }
+    h2 { font-size: 16px; color: #63e36b; margin: 16px 0 6px; }
+  </style>
+  <script type="importmap">
+    { "imports": { "three": "./vendor/three.module.js" } }
+  </script>
+</head>
+<body>
+  <div id="app"></div>
+  <div id="crosshair"></div>
+  <div id="intro">
+    <div class="card">
+      <h1>JETPACK CAVE</h1>
+      <p class="sub">Proleť jeskyní, znič fialové příšery a najdi východ. Hlídej palivo!</p>
+      <div id="buttons"><button id="play">HRÁT NA POČÍTAČI</button></div>
+      <h2>Meta Quest 3</h2>
+      <table>
+        <tr><td>levá páčka</td><td>pohyb</td></tr>
+        <tr><td>pravá páčka</td><td>plynulé otáčení</td></tr>
+        <tr><td>levá spoušť</td><td>jetpack (bere palivo, na zemi se doplňuje)</td></tr>
+        <tr><td>pravá spoušť</td><td>střelba — míříš pravým ovladačem</td></tr>
+        <tr><td>A</td><td>start / další úroveň</td></tr>
+        <tr><td>B / Y</td><td>ztmavení okrajů / rychlost otáčení</td></tr>
+      </table>
+      <h2>Počítač</h2>
+      <table>
+        <tr><td>W A S D</td><td>pohyb</td></tr>
+        <tr><td>myš, ← →</td><td>otáčení; ↑ ↓ nebo myš nahoru/dolů míření</td></tr>
+        <tr><td>mezerník</td><td>jetpack</td></tr>
+        <tr><td>levé tlačítko, F</td><td>střelba</td></tr>
+        <tr><td>Enter</td><td>další úroveň / nová hra</td></tr>
+      </table>
+    </div>
+  </div>
+  <script type="module" src="./src/main.js"></script>
+  <script>
+    // popisky tlačítka VR česky
+    const tr = { 'ENTER VR': 'VSTOUPIT DO VR', 'EXIT VR': 'UKONČIT VR',
+                 'VR NOT SUPPORTED': 'VR TADY NENÍ K DISPOZICI', 'VR NOT ALLOWED': 'VR NENÍ POVOLENO' };
+    new MutationObserver(() => {
+      const b = document.getElementById('vr-button');
+      if (b && tr[b.textContent]) b.textContent = tr[b.textContent];
+    }).observe(document.getElementById('buttons'), { subtree: true, childList: true, characterData: true });
+  </script>
+</body>
+</html>
