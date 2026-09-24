@@ -99,8 +99,9 @@ test('boj: střela zabije příšeru, po zabití všech se otevřou dveře, prů
   assert.equal(w.state, 'playing', 'žádná pauza');
   assert.equal(w.level, 2);
   assert.equal(w.cur, c2);
-  assert.equal(w.enemies.length, 3 + 2, 've 2. úrovni 5 příšer');
-  assert.ok(w.enemies.every((e) => e.pos.z > c2.oz), 'příšery jsou v nové jeskyni');
+  assert.ok(w.boss, '2. úroveň je s bossem');
+  assert.equal(w.enemies.length, 1, 'v úrovni s bossem jen boss');
+  assert.ok(w.enemies.every((e) => e.pos.z > c2.oz), 'boss je v nové jeskyni');
   assert.ok(w.score >= CFG.score.kill + CFG.score.levelBonus);
   // stará jeskyně zmizí, až je hráč hluboko v nové, a vstup se zazdí
   assert.ok(w.cave.caves.includes(c1));
@@ -222,10 +223,11 @@ test('láva: šlápnutí vezme život a vymrští hráče nahoru', () => {
 });
 
 test('příšera za sloupem nestřílí, s výhledem ano', () => {
-  const w = new World(21); w.newGame(); w.nextLevel();   // od 2. úrovně se střílí
+  const w = new World(21); w.newGame(); w.nextLevel(); w.nextLevel();   // 3. úroveň: běžné příšery, střílí
   const c = w.cur;
-  const lc = c.pillars.find((p) => p.kind === 'sloup' && p.r > 1.5) || c.pillars.find((p) => p.kind === 'sloup');
-  assert.ok(lc, 've 2. úrovni je sloup');
+  assert.ok(!w.boss);
+  const lc = c.pillars.find((p) => p.kind === 'sloup' && p.r > 1.5) || c.pillars.find((p) => p.kind === 'sloup') || c.pillars[0];
+  assert.ok(lc, 've 3. úrovni je krápník');
   const col = { ...lc, z: lc.z + c.oz };
   const e = w.enemies[0];
   w.enemies.slice(1).forEach((x) => { x.hp = 0; });
@@ -241,4 +243,65 @@ test('příšera za sloupem nestřílí, s výhledem ano', () => {
   for (let i = 0; i < 30; i++) { e.pos = { x: w.player.pos.x + 4, y: c.floorY + 1.8, z: w.player.pos.z }; e.shotTimer = 0;
     w.events.length = 0; now += 1 / 60; w.update({}, 1 / 60); shots += w.events.filter((x) => x.type === 'enemyShot').length; }
   assert.ok(shots > 0, 's výhledem střílí');
+});
+
+
+// ── boss ──────────────────────────────────────────────────────────────────
+const bossWorld = () => { const w = new World(8); w.newGame(); w.nextLevel(); w.player.invuln = 1e9; return w; };
+// vystřel přímo do bosse a nech střelu doletět
+const shootBoss = (w) => {
+  const b = w.boss, m = w.gunMuzzle();
+  b.pos = { x: m.x, y: m.y, z: m.z + 6 }; b.vel = { x: 0, y: 0, z: 0 };
+  // příšerky odlétnou stranou, ať nechytají střely určené bossovi
+  w.enemies.forEach((e) => { if (e.minion && e.hp > 0) e.pos = { x: m.x + 30, y: m.y + 10, z: m.z }; });
+  w.fire();
+  for (let k = 0; k < 20; k++) { now += 1 / 60; w.updateBullets(1 / 60); }
+};
+
+test('boss jen v každé druhé úrovni', () => {
+  const w = new World(8); w.newGame();
+  const seen = [];
+  for (let l = 1; l <= 6; l++) { seen.push(!!w.boss); if (l < 6) w.nextLevel(); }
+  assert.deepEqual(seen, [false, true, false, true, false, true]);
+});
+
+test('boss: zásah = −1 % zdraví a jedna nová příšerka', () => {
+  const w = bossWorld();
+  assert.equal(w.bossPct, 100);
+  shootBoss(w);
+  assert.equal(w.bossPct, 99);
+  assert.equal(w.enemies.filter((e) => e.minion && e.hp > 0).length, 1);
+  for (let i = 0; i < 4; i++) shootBoss(w);
+  assert.equal(w.bossPct, 95);
+  assert.equal(w.enemies.filter((e) => e.minion && e.hp > 0).length, 5);
+  assert.ok(w.events.some((e) => e.type === 'minionSpawn'));
+});
+
+test('boss: nejvýš 20 příšerek naráz, zdraví ubírá dál', () => {
+  const w = bossWorld();
+  for (let i = 0; i < 30; i++) shootBoss(w);
+  assert.equal(w.bossPct, 70);
+  assert.equal(w.enemies.filter((e) => e.minion && e.hp > 0).length, CFG.boss.maxMinions);
+});
+
+test('boss: po smrti padnou i jeho příšerky a otevře se průchod', () => {
+  const w = bossWorld();
+  for (let i = 0; i < CFG.boss.hp; i++) shootBoss(w);
+  assert.equal(w.boss.hp, 0);
+  assert.equal(w.enemiesLeft, 0, 'žádná příšerka nepřežila');
+  assert.ok(w.events.some((e) => e.type === 'bossKill'));
+  w.update({}, 1 / 60);
+  assert.ok(w.doorOpen);
+  assert.ok(w.score >= CFG.score.boss);
+});
+
+test('boss: dokud žije, průchod je zavřený; střílí dávky', () => {
+  const w = bossWorld();
+  const b = w.boss;
+  w.player.pos = { x: b.pos.x, y: w.cave.floorY, z: b.pos.z - 14 };
+  let volleys = 0;
+  for (let i = 0; i < 60 * 8; i++) { now += 1 / 60; w.update({}, 1 / 60); volleys += w.events.filter((e) => e.type === 'bossVolley').length; w.events.length = 0; }
+  assert.ok(!w.doorOpen);
+  assert.ok(b.awake);
+  assert.ok(volleys >= 1, 'boss vystřelil aspoň jednu dávku');
 });

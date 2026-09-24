@@ -24,6 +24,11 @@ Na počítači jde hrát klávesnicí a myší (**HRÁT NA POČÍTAČI**).
   od 2. úrovně střílí). Přechod je plynulý, bez načítání a ztmavení: další
   jeskyně se staví na pozadí po malých kouscích (max ~2 ms na snímek), už
   během hraní předchozí úrovně.
+- Každá druhá úroveň (2., 4., 6. …) je s **bossem**: obří příšera s korunou a
+  ukazatelem zdraví. Každý zásah mu ubere 1 % zdraví a vypustí jednu malou
+  rychlou příšerku (naráz nejvýš 20 kvůli výkonu). Boss střílí dávky koulí,
+  když na tebe vidí. Když padne, vybuchnou i všechny jeho příšerky a otevře se
+  průchod dál.
 - 3 životy, skóre a nejlepší skóre (uloží se v prohlížeči).
 
 ## Ovládání

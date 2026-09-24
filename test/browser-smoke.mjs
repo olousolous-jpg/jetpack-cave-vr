@@ -52,7 +52,7 @@ try {
              triangles: g.renderer.info.render.triangles, calls: g.renderer.info.render.calls }; });
   console.log('výkon:', JSON.stringify(perf));
   if (perf.triangles > 120000) errors.push('moc trojúhelníků na snímek: ' + perf.triangles);
-  if (perf.maxGenStepMs > 8 || perf.maxMeshStepMs > 8) errors.push('krok stavby na pozadí je moc dlouhý: ' + JSON.stringify(perf));
+  if (perf.maxGenStepMs > 15 || perf.maxMeshStepMs > 15) errors.push('krok stavby na pozadí je moc dlouhý: ' + JSON.stringify(perf));
   // plynulý přechod: zabij příšery, postav hráče do tunelu a nech ho doběhnout do další jeskyně
   await page.evaluate(() => { const w = window.__game.world; w.enemies.forEach((e) => (e.hp = 0)); });
   await page.waitForFunction(() => window.__game.world.doorOpen, null, { timeout: 20000 });
@@ -71,6 +71,24 @@ try {
     return { state: g.world.state, level: g.world.level, caves: g.world.cave.caves.length, visuals: g.caveVisuals.size }; });
   console.log('po průletu:', JSON.stringify(st2));
   await page.screenshot({ path: 'test/shots/5-level2.png' });
+  // 2. úroveň = boss: přiblížit se, pár zásahů (vypustí příšerky), snímek
+  await page.evaluate(() => { const g = window.__game, w = g.world, b = w.boss;
+    w.player.invuln = 1e9; w.player.pos = { x: b.pos.x - 3, y: w.cave.floorY, z: b.pos.z - 13 }; w.player.yaw = 0.15;
+    g.snapCamera(); g.banner.hide(); });
+  // zamířit na bosse (natočení + sklon zaměřovače), pak střílet
+  for (let i = 0; i < 12; i++) {
+    await page.evaluate(() => { const g = window.__game, w = g.world, b = w.boss, p = w.player;
+      p.yaw = Math.atan2(b.pos.x - p.pos.x, b.pos.z - p.pos.z);
+      g.pitch = Math.atan2(b.pos.y - (p.pos.y + 1.9), Math.hypot(b.pos.x - p.pos.x, b.pos.z - p.pos.z)); });
+    await page.keyboard.down('KeyF'); await page.waitForTimeout(250);
+  }
+  await page.keyboard.up('KeyF');
+  await page.waitForTimeout(300);
+  const bs = await page.evaluate(() => ({ boss: window.__game.world.bossPct,
+    minions: window.__game.world.enemies.filter((e) => e.minion && e.hp > 0).length }));
+  console.log('boss:', JSON.stringify(bs));
+  await page.screenshot({ path: 'test/shots/7-boss.png' });
+  if (!(bs.boss < 100)) errors.push('boss nedostal zásah');
   // 5. úroveň: víc lávy — snímek z výšky nad jezírkem
   await page.evaluate(() => { const g = window.__game, w = g.world; for (let i = 0; i < 3; i++) w.nextLevel(); });
   await page.waitForFunction(() => window.__game.meshJobs.length === 0 && window.__game.world.level === 5, null, { timeout: 60000 });

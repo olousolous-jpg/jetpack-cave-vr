@@ -1,6 +1,9 @@
 // Kostičkové modely (postava s jetpackem, fialová příšera, kanystr, střely).
 // Všechno z kvádrů — retro vzhled podle návrhu a málo polygonů pro Quest.
 import * as THREE from 'three';
+import { CFG } from './config.js';
+
+const CFG_SCALE = { boss: CFG.boss.scale, minion: CFG.minion.scale };
 
 const box = (w, h, d, color, opts = {}) => {
   const m = new THREE.Mesh(
@@ -100,13 +103,14 @@ export function animateHero(model, player, time) {
   model.visible = !(player.invuln > 0 && Math.floor(time * 12) % 2 === 0);
 }
 
-export function makeEnemy() {
+export function makeEnemy(kind = 'normal') {
   const g = new THREE.Group();
-  const purple = 0x7b4fd6, dark = 0x3d2178;
+  const boss = kind === 'boss', minion = kind === 'minion';
+  const purple = boss ? 0x5a2aa8 : minion ? 0x9b6ff0 : 0x7b4fd6, dark = boss ? 0x2a0d5c : 0x3d2178;
   const body = box(0.9, 0.85, 0.7, purple);
   g.add(body);
   g.add(at(box(0.62, 0.22, 0.56, purple), 0, 0.5, 0));
-  const eyeW = 0xffffff;
+  const eyeW = boss ? 0xff3030 : 0xffffff;
   for (const x of [-0.2, 0.2]) {
     g.add(at(box(0.22, 0.2, 0.05, eyeW), x, 0.12, 0.36));
     g.add(at(box(0.09, 0.1, 0.03, 0x111111), x * 0.85, 0.1, 0.39));
@@ -122,22 +126,52 @@ export function makeEnemy() {
     g.add(arm);
     g.add(at(box(0.22, 0.25, 0.26, purple), x * 0.22, -0.52, 0));   // nohy
   }
+  if (boss) {
+    // koruna z hrotů
+    for (let i = 0; i < 5; i++) {
+      const spike = at(box(0.12, 0.3, 0.12, 0xffd84a, { emissive: 0x664400 }), -0.24 + i * 0.12, 0.74, 0.1 - Math.abs(i - 2) * 0.05);
+      g.add(spike);
+    }
+    // rudá záře očí
+    const eyeLight = new THREE.PointLight(0xff2020, 3, 12, 1.5);
+    eyeLight.position.set(0, 0.1, 0.8);
+    g.add(eyeLight);
+    // ukazatel zdraví nad hlavou (otáčí se k hráči)
+    const bar = new THREE.Group();
+    bar.position.y = 1.15;
+    const bg = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.12), new THREE.MeshBasicMaterial({ color: 0x220011, depthTest: false }));
+    const fg = new THREE.Mesh(new THREE.PlaneGeometry(1.16, 0.08), new THREE.MeshBasicMaterial({ color: 0xff3050, depthTest: false }));
+    fg.position.z = 0.001;
+    bg.renderOrder = fg.renderOrder = 996;
+    bar.add(bg, fg);
+    g.add(bar);
+    g.userData.bar = bar; g.userData.barFg = fg;
+  }
   g.userData.body = body;
+  g.userData.kind = kind;
   g.traverse((o) => { if (o.material) o.material = o.material.clone(); });
+  g.scale.setScalar(boss ? CFG_SCALE.boss : minion ? CFG_SCALE.minion : 1);
+  g.userData.baseScale = g.scale.x;
   return g;
 }
 
-export function animateEnemy(model, e, player, time) {
+export function animateEnemy(model, e, player, time, camera) {
   model.visible = e.hp > 0;
   if (!model.visible) return;
-  model.position.set(e.pos.x, e.pos.y + Math.sin(time * 3 + e.phase) * 0.08, e.pos.z);
+  model.position.set(e.pos.x, e.pos.y + Math.sin(time * 3 + (e.phase || 0)) * 0.08 * model.userData.baseScale, e.pos.z);
   model.rotation.y = Math.atan2(player.pos.x - e.pos.x, player.pos.z - e.pos.z);
-  const flash = e.hitFlash > 0 ? 1 : 0;
+  const flash = e.hitFlash > 0 ? (e.boss ? 0.3 : 1) : 0;   // velký boss jen zrůžoví, nezbělá
   model.traverse((o) => {
     if (o.material && o.material.emissive) o.material.emissive.setRGB(flash, flash, flash);
   });
-  const s = e.shooter ? 1.05 : 1;
-  model.scale.setScalar(s);
+  model.scale.setScalar(model.userData.baseScale * (e.shooter ? 1.05 : 1) * (e.boss && e.hitFlash > 0 ? 1.04 : 1));
+  const { bar, barFg } = model.userData;
+  if (bar) {
+    const pct = Math.max(0, e.hp / e.maxHp);
+    barFg.scale.x = Math.max(0.001, pct);
+    barFg.position.x = -0.58 * (1 - pct);
+    if (camera) bar.quaternion.copy(model.quaternion).invert().multiply(camera.getWorldQuaternion(new THREE.Quaternion()));
+  }
 }
 
 export function makeCanister() {

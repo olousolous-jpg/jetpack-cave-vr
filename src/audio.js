@@ -59,6 +59,11 @@ export class Sfx {
       case 'kill': this.noise(0.45, 0.45, 900); this.tone(180, 0.35, 'sawtooth', 0.2, 0.3); break;
       case 'spark': this.noise(0.04, 0.08, 3000); break;
       case 'enemyShot': this.tone(300, 0.25, 'triangle', 0.15, 1.8); break;
+      case 'bossHit': this.tone(90, 0.12, 'square', 0.18, 0.7); break;
+      case 'minionSpawn': this.tone(1200, 0.06, 'triangle', 0.08, 1.6); break;
+      case 'bossVolley': this.tone(160, 0.4, 'sawtooth', 0.22, 2.2); break;
+      case 'bossAwake': this.tone(70, 1.2, 'sawtooth', 0.3, 0.6); break;
+      case 'bossKill': this.noise(1.4, 0.6, 700); [196, 147, 110, 73].forEach((f, i) => setTimeout(() => this.tone(f, 0.4, 'sawtooth', 0.25), i * 160)); break;
       case 'lava': this.noise(0.4, 0.4, 600); break;
       case 'playerHit': this.tone(120, 0.5, 'sawtooth', 0.35, 0.5); break;
       case 'pickup': [523, 659, 784].forEach((f, i) => setTimeout(() => this.tone(f, 0.12, 'square', 0.15), i * 70)); break;

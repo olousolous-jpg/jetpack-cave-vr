@@ -59,15 +59,31 @@ export class World {
   toWorld(p, cave = this.cur) { return { x: p.x, y: p.y, z: p.z + cave.oz }; }
 
   // příšery, kanystry a plná nádrž pro aktuální jeskyni
+  isBossLevel(n = this.level) { return n % CFG.boss.everyNth === 0; }
+
   populateLevel() {
-    const n = this.level, c = this.cur, E = CFG.enemy;
+    const n = this.level, c = this.cur, E = CFG.enemy, B = CFG.boss;
     this.player.fuel = P.fuelMax;
     this.enemies = [];
-    for (let i = 0; i < 3 + n; i++) {
+    this.boss = null;
+    if (this.isBossLevel(n)) {
+      // boss se vznáší uprostřed síně, vysoko nad podlahou
+      const mid = Math.floor((c.chamberZ0 + c.chamberZ1) / 2);
+      const top = c.ceilingAt(Math.floor(c.nx / 2), mid);
+      const pos = this.toWorld({ x: c.nx / 2, y: Math.min(c.floorY + 10, top - 4), z: mid });
+      this.boss = {
+        id: 0, boss: true, pos, vel: { x: 0, y: 0, z: 0 }, hp: B.hp, maxHp: B.hp, radius: B.radius,
+        speed: B.speed + 0.15 * n, phase: 0, awake: false, hitFlash: 0,
+        shotTimer: this.rng.range(...B.volleyEvery),
+      };
+      this.enemies.push(this.boss);
+    }
+    const regular = this.boss ? 0 : 3 + n;
+    for (let i = 0; i < regular; i++) {
       const s = c.randomAirSpot(c.chamberZ0 + 20, c.chamberZ1 - 5, 1);
       if (!s) continue;
       this.enemies.push({
-        id: i, pos: this.toWorld(s), vel: { x: 0, y: 0, z: 0 }, hp: E.hp,
+        id: i, pos: this.toWorld(s), vel: { x: 0, y: 0, z: 0 }, hp: E.hp, radius: E.radius,
         speed: E.baseSpeed + E.speedPerLevel * (n - 1) + this.rng.range(-0.3, 0.3),
         orbit: this.rng.range(E.orbitMin, E.orbitMax),
         phase: this.rng.range(0, Math.PI * 2),
@@ -82,7 +98,7 @@ export class World {
       if (s) this.pickups.push({ pos: this.toWorld(s), taken: false });
     }
     this.doorOpen = false;
-    this.emit('levelStart', { level: n });
+    this.emit('levelStart', { level: n, boss: !!this.boss });
   }
 
   // další jeskyně se staví po kouscích na pozadí (volá se každý snímek)
@@ -223,13 +239,16 @@ export class World {
     const from = this.gunMuzzle();
     let dir = this.player.aim;
     // jemná pomoc s mířením: nejbližší nepřítel v úzkém kuželu
-    const cosMax = Math.cos((CFG.gun.assistDeg * Math.PI) / 180);
-    let best = null, bestCos = cosMax;
+    // kužel se rozšíří o úhlovou velikost cíle (velký boss „chytá" i okrajové střely)
+    const assist = (CFG.gun.assistDeg * Math.PI) / 180;
+    let best = null, bestScore = Infinity;
     for (const e of this.enemies) {
       if (e.hp <= 0) continue;
-      const d = norm(sub(e.pos, from));
-      const c = d.x * dir.x + d.y * dir.y + d.z * dir.z;
-      if (c > bestCos) { bestCos = c; best = d; }
+      const v = sub(e.pos, from), dist = len(v), d = norm(v);
+      const ang = Math.acos(Math.max(-1, Math.min(1, d.x * dir.x + d.y * dir.y + d.z * dir.z)));
+      const size = Math.atan((e.radius || CFG.enemy.radius) / Math.max(dist, 0.1));
+      const score = ang - size;
+      if (score < assist && score < bestScore) { bestScore = score; best = d; }
     }
     if (best) dir = best;
     const v = CFG.gun.speed;
@@ -238,7 +257,6 @@ export class World {
   }
 
   updateBullets(dt) {
-    const R = CFG.enemy.radius + 0.15;
     for (const b of this.bullets) {
       const nx = b.pos.x + b.vel.x * dt, ny = b.pos.y + b.vel.y * dt, nz = b.pos.z + b.vel.z * dt;
       const hit = this.cave.raycast(b.pos.x, b.pos.y, b.pos.z, nx, ny, nz, 0.2);
@@ -247,12 +265,13 @@ export class World {
       b.life -= dt;
       for (const e of this.enemies) {
         if (e.hp <= 0) continue;
-        if (len(sub(e.pos, b.pos)) < R) {
+        if (len(sub(e.pos, b.pos)) < (e.radius || CFG.enemy.radius) + 0.15) {
           b.life = 0;
           e.hp -= 1; e.hitFlash = 0.15; e.awake = true;
-          if (e.hp <= 0) {
-            this.score += CFG.score.kill;
-            this.emit('kill', { pos: { ...e.pos } });
+          if (e.boss) this.bossHit(e, b);
+          else if (e.hp <= 0) {
+            this.score += e.minion ? CFG.score.minion : CFG.score.kill;
+            this.emit('kill', { pos: { ...e.pos }, minion: !!e.minion });
           } else this.emit('hit', { pos: { ...e.pos } });
           break;
         }
@@ -271,12 +290,84 @@ export class World {
     this.shots = this.shots.filter((s) => s.life > 0);
   }
 
+  // zásah bosse: −1 % zdraví a vypustí jednu malou příšerku (do limitu)
+  bossHit(e, b) {
+    if (e.hp <= 0) {
+      this.score += CFG.score.boss;
+      this.emit('bossKill', { pos: { ...e.pos } });
+      // s bossem padnou i jeho příšerky
+      for (const m of this.enemies) if (m.minion && m.hp > 0) {
+        m.hp = 0;
+        this.emit('kill', { pos: { ...m.pos }, minion: true, chain: true });
+      }
+      return;
+    }
+    this.emit('bossHit', { pos: { ...b.pos }, pct: e.hp / e.maxHp });
+    this.spawnMinion(e, b.pos);
+  }
+
+  spawnMinion(boss, at) {
+    const M = CFG.minion;
+    if (this.enemies.filter((m) => m.minion && m.hp > 0).length >= CFG.boss.maxMinions) return;
+    // vyletí z místa zásahu směrem ven od středu bosse
+    const out = norm(sub(at, boss.pos));
+    const minion = {
+      minion: true, pos: { x: at.x + out.x * 0.6, y: at.y + out.y * 0.6, z: at.z + out.z * 0.6 },
+      vel: { x: out.x * 7, y: out.y * 7 + 2, z: out.z * 7 }, hp: M.hp, radius: M.radius,
+      speed: M.speed + 0.2 * this.level, orbit: this.rng.range(...M.orbit),
+      phase: this.rng.range(0, Math.PI * 2), shooter: false, hitFlash: 0, awake: true,
+    };
+    // znovupoužij místo po mrtvé příšerce (stejný index = stejný model ve scéně)
+    let i = this.enemies.findIndex((m) => m.minion && m.hp <= 0);
+    if (i < 0) { i = this.enemies.length; this.enemies.push(minion); } else this.enemies[i] = minion;
+    minion.id = i;
+    this.emit('minionSpawn', { index: i });
+  }
+
+  updateBoss(e, dt, center, t) {
+    const B = CFG.boss;
+    const toP = sub(center, e.pos), dist = len(toP);
+    if (!e.awake && dist < CFG.enemy.wakeDist + 10) { e.awake = true; this.emit('bossAwake'); }
+    if (e.hitFlash > 0) e.hitFlash -= dt;
+    if (!e.awake) return;
+    // drží si odstup před hráčem, vznáší se vysoko a pomalu krouží
+    const dir = norm({ x: toP.x, y: 0, z: toP.z });
+    const ang = t * 0.25;
+    const target = { x: center.x - dir.x * B.keepDist + Math.cos(ang) * 4,
+                     y: Math.max(this.cave.floorY + 4, center.y + B.hoverUp + Math.sin(t * 0.7) * 2),
+                     z: center.z - dir.z * B.keepDist + Math.sin(ang) * 4 };
+    const d = sub(target, e.pos), dl = len(d);
+    const want = dl > 0.1 ? { x: d.x / dl * e.speed, y: d.y / dl * e.speed, z: d.z / dl * e.speed } : { x: 0, y: 0, z: 0 };
+    const k = 1 - Math.exp(-1.5 * dt);
+    e.vel.x += (want.x - e.vel.x) * k; e.vel.y += (want.y - e.vel.y) * k; e.vel.z += (want.z - e.vel.z) * k;
+    const size = B.radius * 1.6;
+    const feet = { x: e.pos.x, y: e.pos.y - size / 2, z: e.pos.z };
+    moveBox(this.cave, feet, e.vel, { w: size, h: size }, dt);
+    e.pos = { x: feet.x, y: feet.y + size / 2, z: feet.z };
+    if (dist < B.contactDist) this.hurtPlayer();
+    // dávka koulí do vějíře, jen s výhledem na hráče
+    e.shotTimer -= dt;
+    if (e.shotTimer <= 0 && dist < 40 &&
+        !this.cave.raycast(e.pos.x, e.pos.y, e.pos.z, center.x, center.y, center.z, 0.4)) {
+      e.shotTimer = this.rng.range(...B.volleyEvery);
+      const n = this.rng.int(...B.volleySize);
+      const aim = norm(toP), side = norm({ x: -aim.z, y: 0, z: aim.x });
+      for (let i = 0; i < n; i++) {
+        const spread = (i - (n - 1) / 2) * 0.12;
+        const v = norm({ x: aim.x + side.x * spread, y: aim.y + this.rng.range(-0.05, 0.05), z: aim.z + side.z * spread });
+        this.shots.push({ pos: { ...e.pos }, vel: { x: v.x * B.shotSpeed, y: v.y * B.shotSpeed, z: v.z * B.shotSpeed }, life: 6, big: true });
+      }
+      this.emit('bossVolley', { pos: { ...e.pos }, n });
+    }
+  }
+
   updateEnemies(dt) {
     const p = this.player, E = CFG.enemy;
     const center = { x: p.pos.x, y: p.pos.y + 1.0, z: p.pos.z };
     const t = performanceNow();
     for (const e of this.enemies) {
       if (e.hp <= 0) continue;
+      if (e.boss) { this.updateBoss(e, dt, center, t); continue; }
       if (e.hitFlash > 0) e.hitFlash -= dt;
       const toP = sub(center, e.pos);
       const dist = len(toP);
@@ -300,11 +391,12 @@ export class World {
       const want = dl > 0.01 ? { x: d.x / dl * e.speed, y: d.y / dl * e.speed, z: d.z / dl * e.speed } : { x: 0, y: 0, z: 0 };
       const k = 1 - Math.exp(-2.5 * dt);
       e.vel.x += (want.x - e.vel.x) * k; e.vel.y += (want.y - e.vel.y) * k; e.vel.z += (want.z - e.vel.z) * k;
-      const feet = { x: e.pos.x, y: e.pos.y - 0.5, z: e.pos.z };
-      moveBox(this.cave, feet, e.vel, { w: 0.9, h: 1.0 }, dt);
-      e.pos = { x: feet.x, y: feet.y + 0.5, z: feet.z };
+      const hs = e.minion ? 0.25 : 0.5;
+      const feet = { x: e.pos.x, y: e.pos.y - hs, z: e.pos.z };
+      moveBox(this.cave, feet, e.vel, { w: hs * 1.8, h: hs * 2 }, dt);
+      e.pos = { x: feet.x, y: feet.y + hs, z: feet.z };
 
-      if (dist < E.contactDist) this.hurtPlayer();
+      if (dist < (e.minion ? 0.8 : E.contactDist)) this.hurtPlayer();
       if (e.shooter && e.awake) {
         e.shotTimer -= dt;
         // střílí jen s výhledem na hráče — za sloupem je hráč v bezpečí
@@ -349,6 +441,7 @@ export class World {
   }
 
   get enemiesLeft() { return this.enemies.filter((e) => e.hp > 0).length; }
+  get bossPct() { return this.boss && this.boss.hp > 0 ? Math.round(100 * this.boss.hp / this.boss.maxHp) : 0; }
 }
 
 // čas pro animace nepřátel; v testech jde nastavit ručně

@@ -18,7 +18,7 @@ export class Hud {
 
   draw(world, high) {
     const p = world.player;
-    const key = [p.lives, world.score, Math.round(p.fuel), high, world.level, world.enemiesLeft, world.doorOpen].join('|');
+    const key = [p.lives, world.score, Math.round(p.fuel), high, world.level, world.enemiesLeft, world.doorOpen, world.bossPct].join('|');
     if (key === this.last) return;
     this.last = key;
     const c = this.ctx, W = this.canvas.width;
@@ -45,7 +45,8 @@ export class Hud {
     txt(String(Math.round(p.fuel)).padStart(3, ' '), 800, rows[1] + 40, '#9fe8ff');
     // řádek 3: úroveň, nepřátelé, nejlepší skóre
     txt('LV' + world.level, 30, rows[2] + 40, '#63e36b');
-    txt(world.doorOpen ? '▶ VÝCHOD' : '☻ ' + world.enemiesLeft, 190, rows[2] + 40,
+    if (world.bossPct > 0) txt('BOSS ' + world.bossPct + '%', 190, rows[2] + 40, '#ff5a7a');
+    else txt(world.doorOpen ? '▶ VÝCHOD' : '☻ ' + world.enemiesLeft, 190, rows[2] + 40,
         world.doorOpen ? '#63e36b' : '#b88cff');
     txt('NEJ', 520, rows[2] + 40, '#ffd84a');
     txt(pad(high), 790, rows[2] + 40, '#9fe8ff');

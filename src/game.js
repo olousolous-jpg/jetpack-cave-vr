@@ -258,9 +258,15 @@ export class Game {
     g.userData.plug = plug;
   }
 
+  makeEnemyModel(en) {
+    const m = makeEnemy(en.boss ? 'boss' : en.minion ? 'minion' : 'normal');
+    this.scene.add(m);
+    return m;
+  }
+
   rebuildActors() {
     for (const mdl of this.enemyModels) this.scene.remove(mdl);
-    this.enemyModels = this.world.enemies.map(() => { const e = makeEnemy(); this.scene.add(e); return e; });
+    this.enemyModels = this.world.enemies.map((en) => this.makeEnemyModel(en));
     for (const mdl of this.pickupModels) this.scene.remove(mdl);
     this.pickupModels = this.world.pickups.map((k) => {
       const c = makeCanister(); c.position.set(k.pos.x, k.pos.y, k.pos.z); this.scene.add(c); return c;
@@ -436,7 +442,7 @@ export class Game {
   sync(dt) {
     const w = this.world, t = this.time;
     animateHero(this.hero, w.player, t);
-    w.enemies.forEach((e, i) => this.enemyModels[i] && animateEnemy(this.enemyModels[i], e, w.player, t));
+    w.enemies.forEach((e, i) => this.enemyModels[i] && animateEnemy(this.enemyModels[i], e, w.player, t, this.camera));
     w.pickups.forEach((k, i) => {
       const m = this.pickupModels[i];
       if (!m) return;
@@ -455,6 +461,7 @@ export class Game {
     };
     place(this.bulletPool, w.bullets, true);
     place(this.shotPool, w.shots, false);
+    this.shotPool.forEach((m, i) => { const sh = w.shots[i]; if (sh) m.scale.setScalar(sh.big ? 1.8 : 1); });
     // láva pulzuje, „vře" a občas z ní vyletí žhavá bublina
     const glow = 0.85 + 0.15 * Math.sin(t * 3);
     this.lavaMat.color.setRGB(glow, glow, glow);
@@ -504,7 +511,7 @@ export class Game {
     for (const ev of w.events) {
       this.sfx.play(ev.type);
       switch (ev.type) {
-        case 'kill': this.burst(ev.pos, 0x8a5cf0, 22, 6); this.pulse(0.6, 80); break;
+        case 'kill': this.burst(ev.pos, 0x8a5cf0, ev.minion ? 8 : 22, ev.minion ? 4 : 6); if (!ev.chain) this.pulse(0.6, 80); break;
         case 'hit': this.burst(ev.pos, 0xffffff, 5, 3); this.pulse(0.3, 30); break;
         case 'spark': this.burst(ev.pos, 0xffd060, 3, 2); break;
         case 'playerHit': this.pulse(1, 250, true);
@@ -527,10 +534,21 @@ export class Game {
           break;
         }
         case 'levelDone': this.saveHigh(); break;
+        case 'minionSpawn':
+          if (!this.enemyModels[ev.index]) this.enemyModels[ev.index] = this.makeEnemyModel(w.enemies[ev.index]);
+          break;
+        case 'bossHit': this.burst(ev.pos, 0xb88cff, 4, 3); this.pulse(0.35, 30); break;
+        case 'bossAwake': this.banner.show(['BOSS!', 'Každý zásah: −1 % a nová příšerka'], 2.5, this.time); break;
+        case 'bossKill':
+          this.burst(ev.pos, 0x8a5cf0, 50, 12); this.burst(ev.pos, 0xffd84a, 30, 9); this.burst(ev.pos, 0xff4040, 20, 7);
+          this.pulse(1, 500, true);
+          this.banner.show(['BOSS PORAŽEN!', '+' + CFG.score.boss + ' bodů • průchod otevřen'], 3, this.time);
+          break;
         case 'levelStart':
           // plynulý přechod: jen nový nápis, nové příšery a kanystry — žádné načítání
           this.rebuildActors();
-          if (w.level > 1) this.banner.show(['ÚROVEŇ ' + w.level, (w.enemies.length) + ' příšer • palivo doplněno'], 2.5, this.time);
+          if (ev.boss) this.banner.show(['ÚROVEŇ ' + w.level + ' — BOSS', 'palivo doplněno'], 2.5, this.time);
+          else if (w.level > 1) this.banner.show(['ÚROVEŇ ' + w.level, (w.enemies.length) + ' příšer • palivo doplněno'], 2.5, this.time);
           break;
         case 'gameOver':
           this.overAt = this.time;
