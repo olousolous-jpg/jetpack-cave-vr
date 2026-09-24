@@ -6,7 +6,7 @@ import { CFG } from './config.js';
 import { makeHero, animateHero, makeEnemy, animateEnemy, makeCanister,
          bulletGeo, bulletMat, shotGeo, shotMat } from './models.js';
 import { Hud, Banner } from './hud.js';
-import { buildCaveGeometry } from './cavemesh.js';
+import { buildCaveSteps } from './cavemesh.js';
 import { Keyboard, mapXRSources } from './input.js';
 import { Sfx } from './audio.js';
 
@@ -59,8 +59,15 @@ export class Game {
 
     this.hero = makeHero();
     this.scene.add(this.hero);
-    this.caveGroup = new THREE.Group();
-    this.scene.add(this.caveGroup);
+    this.caveVisuals = new Map();     // Cave → skupina modelů
+    this.meshJobs = [];
+    this.unitBox = new THREE.BoxGeometry(1, 1, 1);
+    this.crystalGeo = new THREE.OctahedronGeometry(0.6, 0);
+    this.rockMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+    this.doorMat = new THREE.MeshBasicMaterial({ color: 0x55ddff, transparent: true, opacity: 0.55 });
+    this.lavaMat = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false });
+    this.crystalMat = new THREE.MeshBasicMaterial({ color: 0x4fb4ff });
+    this.bubbleAt = 0;
     this.enemyModels = [];
     this.pickupModels = [];
     this.bulletPool = this.pool(40, () => new THREE.Mesh(bulletGeo, bulletMat));
@@ -71,7 +78,7 @@ export class Game {
 
     this.setupHud();
     this.setupXR();
-    this.buildLevel();
+    this.resetCaves();
     this.showMenu();
     this.snapCamera();
 
@@ -165,60 +172,93 @@ export class Game {
   }
 
   // ── jeskyně ──────────────────────────────────────────────────────────────
-  buildLevel() {
-    for (const c of [...this.caveGroup.children]) {
-      c.geometry?.dispose?.();
-      this.caveGroup.remove(c);
+  // Každá jeskyně má vlastní skupinu modelů posunutou o `oz`. Nová jeskyně se
+  // skládá po kouscích (mesh job), stará se po opuštění zahodí.
+  resetCaves() {
+    for (const g of this.caveVisuals.values()) this.disposeGroup(g);
+    this.caveVisuals.clear();
+    this.meshJobs = [];
+    for (const cave of this.world.cave.caves) this.addCaveVisual(cave, true);
+    this.rebuildActors();
+  }
+
+  addCaveVisual(cave, immediate = false) {
+    const job = { cave, it: buildCaveSteps(cave) };
+    if (immediate) { let r; while (!(r = job.it.next()).done); this.finishCaveVisual(cave, r.value); }
+    else this.meshJobs.push(job);
+  }
+
+  // postupné skládání modelů připravovaných jeskyní v časovém limitu na snímek
+  runMeshJobs(budgetMs) {
+    const t0 = performance.now();
+    while (this.meshJobs.length && performance.now() - t0 < budgetMs) {
+      const job = this.meshJobs[0];
+      const r = job.it.next();
+      if (r.done) { this.meshJobs.shift(); if (this.world.cave.caves.includes(job.cave)) this.finishCaveVisual(job.cave, r.value); }
     }
-    const cave = this.world.cave;
-    const cells = cave.surfaceCells();
-    const rock = cells.filter((c) => c[3] !== DOOR && c[3] !== LAVA), door = cells.filter((c) => c[3] === DOOR);
-    const lava = cells.filter((c) => c[3] === LAVA);
-    const geo = new THREE.BoxGeometry(1, 1, 1);
+  }
+
+  finishCaveVisual(cave, { geometries, lava, door, crystals }) {
+    const group = new THREE.Group();
+    group.position.z = cave.oz;
+    const geo = this.unitBox;
     const m = new THREE.Matrix4(), col = new THREE.Color();
-    // skála: jeden model jen z viditelných stěn (viz cavemesh.js)
-    const rockMesh = new THREE.Mesh(buildCaveGeometry(cave), new THREE.MeshLambertMaterial({ vertexColors: true }));
-    this.caveGroup.add(rockMesh);
+    // skála: kusy po 10 m jen z viditelných stěn (viz cavemesh.js); kus mimo
+    // zorné pole three.js nekreslí
+    for (const g of geometries) group.add(new THREE.Mesh(g, this.rockMat));
     // energetická bariéra ve dveřích
-    this.doorMesh = new THREE.InstancedMesh(geo, new THREE.MeshBasicMaterial({
-      color: 0x55ddff, transparent: true, opacity: 0.55 }), Math.max(1, door.length));
-    door.forEach(([x, y, z], i) => { m.makeTranslation(x + 0.5, y + 0.5, z + 0.5); this.doorMesh.setMatrixAt(i, m); });
-    this.doorMesh.count = door.length;
-    this.caveGroup.add(this.doorMesh);
-    // láva: zapuštěná o kousek níž než podlaha, svítí a pulzuje (barva se mění v sync())
-    this.lavaMat = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false });
-    this.lavaMesh = new THREE.InstancedMesh(geo, this.lavaMat, Math.max(1, lava.length));
+    const doorMesh = new THREE.InstancedMesh(geo, this.doorMat, Math.max(1, door.length));
+    door.forEach(([x, y, z], i) => { m.makeTranslation(x + 0.5, y + 0.5, z + 0.5); doorMesh.setMatrixAt(i, m); });
+    doorMesh.count = door.length;
+    doorMesh.visible = !cave.doorOpened;
+    group.add(doorMesh);
+    // láva: zapuštěná o kousek níž než podlaha, svítí a „vře" (barvy se mění v sync())
+    const lavaMesh = new THREE.InstancedMesh(geo, this.lavaMat, Math.max(1, lava.length));
     lava.forEach(([x, y, z], i) => {
       m.makeTranslation(x + 0.5, y + 0.35, z + 0.5);
-      this.lavaMesh.setMatrixAt(i, m);
-      this.lavaMesh.setColorAt(i, col.setHex(LAVA_COLORS[(x * 7 + z * 13) % LAVA_COLORS.length]));
+      lavaMesh.setMatrixAt(i, m);
+      lavaMesh.setColorAt(i, col.setHex(LAVA_COLORS[(x * 7 + z * 13) % LAVA_COLORS.length]));
     });
-    this.lavaMesh.count = lava.length;
-    this.caveGroup.add(this.lavaMesh);
-    this.lavaCells = lava;
-    // oranžová záře nad největšími jezírky (max 4 světla — výkon na Questu)
+    lavaMesh.count = lava.length;
+    group.add(lavaMesh);
+    // oranžová záře nad největšími jezírky (max 4 světla na jeskyni — výkon na Questu)
     [...cave.pools].sort((a, b) => b.cells - a.cells).slice(0, 4).forEach((pool) => {
       const l = new THREE.PointLight(0xff6a20, 2 + pool.r * 0.4, 6 + pool.r * 2.5, 1.5);
       l.position.set(pool.x, cave.floorY + 1.2, pool.z);
-      this.caveGroup.add(l);
+      group.add(l);
     });
-    this.bubbleAt = 0;
-    // modré krystaly na stěnách (osvětlení hloubky)
-    const crystals = rock.filter((c, i) => (i * 2654435761 >>> 0) % 97 === 0 && cave.get(c[0], c[1] + 1, c[2]) === AIR).slice(0, 40);
-    const cry = new THREE.InstancedMesh(new THREE.OctahedronGeometry(0.6, 0),
-      new THREE.MeshBasicMaterial({ color: 0x4fb4ff }), Math.max(1, crystals.length));
-    crystals.forEach(([x, y, z], i) => {
-      m.makeTranslation(x + 0.5, y + 1.0, z + 0.5);
-      cry.setMatrixAt(i, m);
-    });
+    // modré krystaly na podlaze
+    const cry = new THREE.InstancedMesh(this.crystalGeo, this.crystalMat, Math.max(1, crystals.length));
+    crystals.forEach(([x, y, z], i) => { m.makeTranslation(x + 0.5, y + 1.0, z + 0.5); cry.setMatrixAt(i, m); });
     cry.count = crystals.length;
-    this.caveGroup.add(cry);
-    // světlo u východu
+    group.add(cry);
+    // modrá záře u východu (vede hráče k tunelu)
     const exitLight = new THREE.PointLight(0x55ddff, 3, 14, 1.5);
     exitLight.position.set(cave.nx / 2, cave.floorY + 2, cave.doorZ - 1);
-    this.caveGroup.add(exitLight);
+    group.add(exitLight);
+    group.userData = { doorMesh, lavaMesh, lava, plug: null };
+    this.scene.add(group);
+    this.caveVisuals.set(cave, group);
+  }
 
-    // nepřátelé a kanystry
+  disposeGroup(g) {
+    this.scene.remove(g);
+    g.traverse((o) => { if (o.isMesh && o.geometry !== this.unitBox && o.geometry !== this.crystalGeo) o.geometry.dispose(); });
+  }
+
+  // zazděný vstup (po zahození předchozí jeskyně) — kus skály přes ústí tunelu
+  addPlug(cave) {
+    const g = this.caveVisuals.get(cave);
+    if (!g || g.userData.plug) return;
+    const t = cave.tunnel;
+    const plug = new THREE.Mesh(new THREE.BoxGeometry(t.x1 - t.x0, t.y1 - t.y0, 1),
+      new THREE.MeshLambertMaterial({ color: 0x7a4c24 }));
+    plug.position.set((t.x0 + t.x1) / 2, (t.y0 + t.y1) / 2, 0.5);
+    g.add(plug);
+    g.userData.plug = plug;
+  }
+
+  rebuildActors() {
     for (const mdl of this.enemyModels) this.scene.remove(mdl);
     this.enemyModels = this.world.enemies.map(() => { const e = makeEnemy(); this.scene.add(e); return e; });
     for (const mdl of this.pickupModels) this.scene.remove(mdl);
@@ -235,7 +275,8 @@ export class Game {
   startGame() {
     this.sfx.unlock();
     this.world.newGame();
-    this.buildLevel();
+    this.world.events.length = 0;
+    this.resetCaves();
     this.snapCamera();
     this.banner.show(['ÚROVEŇ 1', 'Znič všechny příšery'], 2.5, this.time);
     document.body.classList.add('playing');
@@ -260,14 +301,14 @@ export class Game {
     }
 
     if (w.state === 'menu' && startPressed) this.startGame();
-    else if (w.state === 'cleared' && startPressed && this.time > this.clearedAt + 1.2) {
-      w.nextLevel(); this.buildLevel(); this.snapCamera();
-      this.banner.show(['ÚROVEŇ ' + w.level, (w.enemies.length) + ' příšer'], 2.5, this.time);
-    } else if (w.state === 'gameover' && startPressed && this.time > this.overAt + 1.5) this.startGame();
+    else if (w.state === 'gameover' && startPressed && this.time > this.overAt + 1.5) this.startGame();
 
     input.turn *= TURN_SPEEDS[this.settings.turnIdx];
     w.update(input, dt);
     this.handleEvents();
+    // další jeskyně se připravuje na pozadí: data i model po malých kouscích
+    if (w.state === 'playing') { w.buildStep(3); this.handleEvents(); }
+    this.runMeshJobs(4);
     this.sfx.jetpack(w.state === 'playing' ? w.player.thrusting : 0);
 
     this.updateCamera(dt, input);
@@ -414,24 +455,26 @@ export class Game {
     };
     place(this.bulletPool, w.bullets, true);
     place(this.shotPool, w.shots, false);
-    this.doorMesh.visible = !w.doorOpen;
-    // láva pulzuje a občas z ní vyletí žhavá bublina
+    // láva pulzuje, „vře" a občas z ní vyletí žhavá bublina
     const glow = 0.85 + 0.15 * Math.sin(t * 3);
     this.lavaMat.color.setRGB(glow, glow, glow);
-    const lc = this.lavaCells.length;
-    if (lc && this.lavaMesh.instanceColor) {
-      // „vření": pár náhodných kostek změní odstín každý snímek
-      const tmp = new THREE.Color();
-      for (let i = 0; i < Math.max(1, lc >> 4); i++) {
-        const k = Math.floor(Math.random() * lc);
-        this.lavaMesh.setColorAt(k, tmp.setHex(LAVA_COLORS[Math.floor(Math.random() * LAVA_COLORS.length)]));
+    const tmp = new THREE.Color();
+    for (const [cave, g] of this.caveVisuals) {
+      const { lavaMesh, lava, doorMesh } = g.userData;
+      doorMesh.visible = !cave.doorOpened;
+      // další jeskyně je schovaná za dveřmi — kreslit ji až po jejich otevření
+      g.visible = cave === w.cur || cave === w.prev || !!w.cur.doorOpened;
+      if (!g.visible) continue;
+      const lc = lava.length;
+      if (!lc || !lavaMesh.instanceColor) continue;
+      for (let i = 0; i < Math.max(1, lc >> 4); i++)
+        lavaMesh.setColorAt(Math.floor(Math.random() * lc), tmp.setHex(LAVA_COLORS[Math.floor(Math.random() * LAVA_COLORS.length)]));
+      lavaMesh.instanceColor.needsUpdate = true;
+      if (cave === w.cur && t > this.bubbleAt) {
+        this.bubbleAt = t + 0.25;
+        const [x, y, z] = lava[Math.floor(Math.random() * lc)];
+        this.burst({ x: x + 0.5, y: y + 1, z: z + 0.5 + cave.oz }, 0xffa030, 2, 1.5);
       }
-      this.lavaMesh.instanceColor.needsUpdate = true;
-    }
-    if (this.lavaCells.length && t > this.bubbleAt) {
-      this.bubbleAt = t + 0.25;
-      const [x, y, z] = this.lavaCells[Math.floor(Math.random() * this.lavaCells.length)];
-      this.burst({ x: x + 0.5, y: y + 1, z: z + 0.5 }, 0xffa030, 2, 1.5);
     }
     // částice
     this.particles = this.particles.filter((pt) => {
@@ -468,11 +511,26 @@ export class Game {
           this.banner.show(['AU!', 'Zbývá životů: ' + ev.lives], 1.2, this.time); break;
         case 'lava': this.pulse(1, 200, true); this.burst(ev.pos, 0xff7020, 12, 4); break;
         case 'pickup': this.banner.show(['PALIVO +' + CFG.pickup.fuel], 1.0, this.time); break;
-        case 'doorOpen': this.banner.show(['PRŮCHOD OTEVŘEN!', 'Leť k modré záři na konci'], 2.5, this.time); break;
-        case 'levelDone':
-          this.clearedAt = this.time;
-          this.saveHigh();
-          this.banner.show(['ÚROVEŇ ' + ev.level + ' HOTOVA', 'Skóre ' + w.score + ' — pokračuj ' + (this.inVR ? 'tlačítkem A' : 'Enterem')], 0, this.time);
+        case 'doorOpen':
+          // tunel vede do další jeskyně — její model musí být hotový
+          for (const j of [...this.meshJobs]) { let r; while (!(r = j.it.next()).done); this.meshJobs.splice(this.meshJobs.indexOf(j), 1); this.finishCaveVisual(j.cave, r.value); }
+          this.banner.show(['PRŮCHOD OTEVŘEN!', 'Leť tunelem k modré záři'], 2.5, this.time); break;
+        case 'caveReady':
+          // při otevření dveří musí být model hotový hned (dostavět zbytek teď)
+          if (!this.caveVisuals.has(ev.cave) && !this.meshJobs.some((j) => j.cave === ev.cave)) this.addCaveVisual(ev.cave);
+          break;
+        case 'caveRemoved': {
+          const g = this.caveVisuals.get(ev.cave);
+          if (g) { this.disposeGroup(g); this.caveVisuals.delete(ev.cave); }
+          this.meshJobs = this.meshJobs.filter((j) => j.cave !== ev.cave);
+          this.addPlug(ev.sealed);
+          break;
+        }
+        case 'levelDone': this.saveHigh(); break;
+        case 'levelStart':
+          // plynulý přechod: jen nový nápis, nové příšery a kanystry — žádné načítání
+          this.rebuildActors();
+          if (w.level > 1) this.banner.show(['ÚROVEŇ ' + w.level, (w.enemies.length) + ' příšer • palivo doplněno'], 2.5, this.time);
           break;
         case 'gameOver':
           this.overAt = this.time;

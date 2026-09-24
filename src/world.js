@@ -1,6 +1,7 @@
 // Herní logika bez vykreslování: hráč, nepřátelé, střely, palivo, úrovně.
 // Scéna (scene.js) jen čte stav a kreslí; zvuky a efekty reagují na `events`.
-import { Cave } from './cave.js';
+import { Cave, ROCK } from './cave.js';
+import { CaveChain } from './chain.js';
 import { moveBox } from './physics.js';
 import { CFG } from './config.js';
 import { makeRng } from './rng.js';
@@ -20,13 +21,13 @@ export class World {
     this.score = 0;
     this.level = 0;
     this.events = [];
-    this.state = 'menu';            // menu | playing | cleared | gameover
+    this.state = 'menu';            // menu | playing | gameover
     this.player = {
       pos: { x: 0, y: 0, z: 0 }, vel: { x: 0, y: 0, z: 0 },
       yaw: 0, fuel: P.fuelMax, lives: P.lives, invuln: 0,
       onGround: false, thrusting: 0, cooldown: 0, aim: { x: 0, y: 0, z: 1 },
     };
-    this.startLevel(1);
+    this.newGame();
     this.state = 'menu';
   }
 
@@ -35,28 +36,38 @@ export class World {
   newGame() {
     this.score = 0;
     this.player.lives = P.lives;
-    this.startLevel(1);
-  }
-
-  startLevel(n) {
-    this.level = n;
-    this.cave = new Cave(n, this.seed);
+    this.level = 1;
+    // řetěz jeskyní: aktuální (cur), připravovaná další (next), opouštěná (prev)
+    this.cave = new CaveChain();
+    this.cur = new Cave(1, this.seed);
+    this.cave.add(this.cur);
+    this.prev = null;
+    this.next = null;
     const p = this.player;
-    Object.assign(p.pos, this.cave.spawn);
+    p.pos = this.toWorld(this.cur.spawn);
     p.vel = { x: 0, y: 0, z: 0 };
     p.yaw = 0;                       // jeskyně vede ve směru +z
-    p.fuel = P.fuelMax;
     p.invuln = 1.0;
     this.bullets = [];
     this.shots = [];                 // střely nepřátel
+    this.populateLevel();
+    this.startPending();
+    this.state = 'playing';
+    this.emit('newGame');
+  }
+
+  toWorld(p, cave = this.cur) { return { x: p.x, y: p.y, z: p.z + cave.oz }; }
+
+  // příšery, kanystry a plná nádrž pro aktuální jeskyni
+  populateLevel() {
+    const n = this.level, c = this.cur, E = CFG.enemy;
+    this.player.fuel = P.fuelMax;
     this.enemies = [];
-    const E = CFG.enemy;
-    const count = 3 + n;
-    for (let i = 0; i < count; i++) {
-      const s = this.cave.randomAirSpot(this.cave.chamberZ0 + 20, this.cave.chamberZ1 - 5, 1);
+    for (let i = 0; i < 3 + n; i++) {
+      const s = c.randomAirSpot(c.chamberZ0 + 20, c.chamberZ1 - 5, 1);
       if (!s) continue;
       this.enemies.push({
-        id: i, pos: s, vel: { x: 0, y: 0, z: 0 }, hp: E.hp,
+        id: i, pos: this.toWorld(s), vel: { x: 0, y: 0, z: 0 }, hp: E.hp,
         speed: E.baseSpeed + E.speedPerLevel * (n - 1) + this.rng.range(-0.3, 0.3),
         orbit: this.rng.range(E.orbitMin, E.orbitMax),
         phase: this.rng.range(0, Math.PI * 2),
@@ -67,15 +78,42 @@ export class World {
     }
     this.pickups = [];
     for (let i = 0; i < 2; i++) {
-      const s = this.cave.floorSpot(this.cave.chamberZ0 + 8, this.cave.chamberZ1 - 2);
-      if (s) this.pickups.push({ pos: s, taken: false });
+      const s = c.floorSpot(c.chamberZ0 + 8, c.chamberZ1 - 2);
+      if (s) this.pickups.push({ pos: this.toWorld(s), taken: false });
     }
     this.doorOpen = false;
-    this.state = 'playing';
     this.emit('levelStart', { level: n });
   }
 
-  // vstup: { moveX, moveY, turn, thrust (0..1), fire (bool), aimDir?:{x,y,z}, aimFrom? }
+  // další jeskyně se staví po kouscích na pozadí (volá se každý snímek)
+  startPending() {
+    this.next = new Cave(this.level + 1, this.seed,
+      { oz: this.cur.oz + this.cur.nz, entrance: true, deferred: true });
+  }
+
+  // stavba po kouscích v časovém limitu (ms) na snímek; vždy aspoň jeden krok
+  buildStep(budgetMs = 3) {
+    const nx = this.next;
+    if (!nx || nx.added) return;
+    const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    const t0 = now();
+    do { if (nx.step(1)) { this.attachNext(); return; } } while (now() - t0 < budgetMs);
+  }
+
+  finishPending() {
+    const nx = this.next;
+    if (!nx || nx.added) return;
+    nx.finish();
+    this.attachNext();
+  }
+
+  attachNext() {
+    this.next.added = true;
+    this.cave.add(this.next);
+    this.emit('caveReady', { cave: this.next });
+  }
+
+  // vstup: { moveX, moveY, turn, thrust (0..1), fire (bool), aimDir?:{x,y,z} }
   update(input, dt) {
     dt = Math.min(dt, 0.05);
     if (this.state !== 'playing') return;
@@ -85,17 +123,48 @@ export class World {
     this.updatePickups();
     if (!this.doorOpen && this.enemies.every((e) => e.hp <= 0)) {
       this.doorOpen = true;
-      this.cave.openDoor();
-      this.emit('doorOpen');
+      this.cur.openDoor();
+      this.cur.doorOpened = true;
+      this.finishPending();            // za dveřmi musí další jeskyně už být
+      this.emit('doorOpen', { cave: this.cur });
     }
-    if (this.doorOpen && this.player.pos.z > this.cave.exitZ) {
-      this.score += CFG.score.levelBonus + Math.round(this.player.fuel * CFG.score.fuelBonusPerUnit);
-      this.state = 'cleared';
-      this.emit('levelDone', { level: this.level });
-    }
+    const nx = this.next, p = this.player;
+    // proletěl tunelem do další jeskyně → nová úroveň, bez zastavení
+    if (nx && nx.added && p.pos.z > nx.oz + nx.chamberZ0 + 1) this.enterNext();
+    // opuštěnou jeskyni zahoď, až je hráč hluboko v nové (za zády, v mlze)
+    if (this.prev && p.pos.z > this.cur.oz + this.cur.chamberZ0 + 16) this.dropPrev();
   }
 
-  nextLevel() { this.startLevel(this.level + 1); }
+  enterNext() {
+    this.score += CFG.score.levelBonus + Math.round(this.player.fuel * CFG.score.fuelBonusPerUnit);
+    this.emit('levelDone', { level: this.level });
+    if (this.prev) this.dropPrev();
+    this.prev = this.cur;
+    this.cur = this.next;
+    this.next = null;
+    this.level += 1;
+    this.populateLevel();
+    this.startPending();
+  }
+
+  dropPrev() {
+    const old = this.prev;
+    this.cave.remove(old);
+    this.prev = null;
+    // zazdi vstup do nové jeskyně (za ním už nic není)
+    const c = this.cur, t = c.tunnel;
+    for (let y = t.y0; y < t.y1; y++) for (let x = t.x0; x < t.x1; x++) c.set(x, y, 0, ROCK);
+    this.emit('caveRemoved', { cave: old, sealed: c });
+  }
+
+  // okamžitý přesun do další úrovně (testy, ladění)
+  nextLevel() {
+    this.finishPending();
+    this.player.pos = this.toWorld(this.next.spawn, this.next);
+    this.player.vel = { x: 0, y: 0, z: 0 };
+    this.enterNext();
+    this.dropPrev();
+  }
 
   updatePlayer(input, dt) {
     const p = this.player;

@@ -20,8 +20,10 @@ Na počítači jde hrát klávesnicí a myší (**HRÁT NA POČÍTAČI**).
   cesta k východu a kanystry jsou vždy mimo lávu, láva nikdy nezabere víc než
   30 % podlahy.
 - V každé jeskyni je pár příšer. Když padnou všechny, otevře se modrá bariéra
-  na konci. Průlet tunelem = další, těžší úroveň (víc příšer, rychlejší, od
-  2. úrovně střílí).
+  na konci. Tunel vede rovnou do další, těžší jeskyně (víc příšer, rychlejší,
+  od 2. úrovně střílí). Přechod je plynulý, bez načítání a ztmavení: další
+  jeskyně se staví na pozadí po malých kouscích (max ~2 ms na snímek), už
+  během hraní předchozí úrovně.
 - 3 životy, skóre a nejlepší skóre (uloží se v prohlížeči).
 
 ## Ovládání
@@ -31,7 +33,7 @@ Na počítači jde hrát klávesnicí a myší (**HRÁT NA POČÍTAČI**).
 | pravá páčka | plynulé otáčení |
 | levá spoušť / grip | jetpack (síla podle stisku) |
 | pravá spoušť | střelba, míří se pravým ovladačem (laser) |
-| A | start / další úroveň |
+| A | start / nová hra po konci |
 | B | zapnout / vypnout ztmavení okrajů při pohybu |
 | Y | rychlost otáčení (pomalé / střední / rychlé) |
 
@@ -42,7 +44,7 @@ Na počítači jde hrát klávesnicí a myší (**HRÁT NA POČÍTAČI**).
 | myš nahoru/dolů, ↑ ↓ | míření |
 | mezerník | jetpack |
 | levé tlačítko, F | střelba |
-| Enter | další úroveň / nová hra |
+| Enter | nová hra po konci |
 
 **Pohodlí ve VR:** plynulé otáčení a let můžou některým lidem dělat nevolno.
 Hra proto při pohybu ztmaví okraje obrazu (vypíná se tlačítkem B) a otáčení
@@ -52,7 +54,8 @@ jde zpomalit tlačítkem Y. Kamera se nenaklání a neotáčí sama od sebe.
 - Čisté HTML + JavaScript moduly, bez sestavování. Knihovna [three.js](https://threejs.org)
   (MIT) je přibalená ve `vendor/`.
 - `src/world.js`, `cave.js`, `physics.js`: herní logika bez vykreslování (testuje se v Node).
-- `src/cavemesh.js`: jeskyně jako jeden model jen z viditelných stěn kostek (~85 tisíc trojúhelníků).
+- `src/chain.js`: řetěz jeskyní za sebou (fyzika a míření se ptají řetězu ve světových souřadnicích).
+- `src/cavemesh.js`: model jeskyně jen z viditelných stěn kostek, v kusech po 10 m (mimo zorné pole se nekreslí), stavěný po kouscích.
 - `src/game.js`: scéna, kamera, WebXR ovladače, HUD, efekty. `src/models.js`: kostičkové modely.
 - `src/input.js`: mapování ovladačů Questu a klávesnice. `src/audio.js`: syntetizované zvuky.
 - Nastavení ladění (rychlosti, palivo, kamera) je v `src/config.js`.

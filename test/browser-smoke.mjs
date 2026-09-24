@@ -37,29 +37,49 @@ try {
              score: w.score, enemies: w.enemiesLeft, fps: window.__game.renderer.info.render.frame };
   });
   console.log('stav po letu:', JSON.stringify(st));
-  const perf = await page.evaluate(() => { const g = window.__game; const t0 = performance.now(); g.buildLevel();
-    const ms = performance.now() - t0; g.renderer.render(g.scene, g.camera);
-    return { buildMs: Math.round(ms), triangles: g.renderer.info.render.triangles, calls: g.renderer.info.render.calls }; });
+  const perf = await page.evaluate(async () => {
+    const g = window.__game, w = g.world;
+    const { buildCaveSteps } = await import('./src/cavemesh.js');
+    const { Cave } = await import('./src/cave.js');
+    // nejdelší jednotlivý krok stavby další jeskyně (data i model) = největší možný zásek
+    const c = new Cave(7, 99, { oz: 0, entrance: true, deferred: true });
+    let maxGen = 0, t;
+    for (;;) { t = performance.now(); const done = c.step(1); maxGen = Math.max(maxGen, performance.now() - t); if (done) break; }
+    const it = buildCaveSteps(c); let maxMesh = 0, r;
+    do { t = performance.now(); r = it.next(); maxMesh = Math.max(maxMesh, performance.now() - t); } while (!r.done);
+    g.renderer.render(g.scene, g.camera);
+    return { maxGenStepMs: +maxGen.toFixed(1), maxMeshStepMs: +maxMesh.toFixed(1),
+             triangles: g.renderer.info.render.triangles, calls: g.renderer.info.render.calls }; });
   console.log('výkon:', JSON.stringify(perf));
-  if (perf.triangles > 250000) errors.push('moc trojúhelníků na snímek: ' + perf.triangles);
-  // simulace dokončení úrovně: zabij příšery, přesuň hráče k východu
+  if (perf.triangles > 120000) errors.push('moc trojúhelníků na snímek: ' + perf.triangles);
+  if (perf.maxGenStepMs > 8 || perf.maxMeshStepMs > 8) errors.push('krok stavby na pozadí je moc dlouhý: ' + JSON.stringify(perf));
+  // plynulý přechod: zabij příšery, postav hráče do tunelu a nech ho doběhnout do další jeskyně
   await page.evaluate(() => { const w = window.__game.world; w.enemies.forEach((e) => (e.hp = 0)); });
-  await page.waitForTimeout(300);
-  await page.evaluate(() => { const w = window.__game.world; w.player.pos.z = w.cave.exitZ + 0.5; w.player.pos.x = w.cave.nx / 2; w.player.pos.y = w.cave.floorY; });
-  await page.waitForTimeout(300);
-  await page.screenshot({ path: 'test/shots/4-cleared.png' });
-  await page.waitForFunction(() => { const g = window.__game; return g.world.state === 'cleared' && g.time > g.clearedAt + 1.4; }, null, { timeout: 30000 });
-  await page.keyboard.press('Enter');
-  await page.waitForTimeout(600);
-  const st2 = await page.evaluate(() => ({ state: window.__game.world.state, level: window.__game.world.level }));
-  console.log('po Enteru:', JSON.stringify(st2));
+  await page.waitForFunction(() => window.__game.world.doorOpen, null, { timeout: 20000 });
+  await page.evaluate(() => { const g = window.__game, w = g.world, c = w.cur;
+    w.player.pos = { x: c.tunnel.x0 + 2, y: c.floorY, z: c.oz + c.doorZ - 3 }; w.player.yaw = 0; w.player.invuln = 99;
+    g.snapCamera(); g.banner.hide(); });
+  await page.keyboard.down('KeyW');
+  await page.waitForTimeout(1500);
+  await page.screenshot({ path: 'test/shots/4-tunnel.png' });
+  const t0 = Date.now();
+  await page.waitForFunction(() => window.__game.world.level === 2, null, { timeout: 90000 });
+  await page.keyboard.up('KeyW');
+  console.log('přechod do 2. úrovně bez Enteru za', Date.now() - t0, 'ms reálného času');
+  await page.waitForTimeout(500);
+  const st2 = await page.evaluate(() => { const g = window.__game;
+    return { state: g.world.state, level: g.world.level, caves: g.world.cave.caves.length, visuals: g.caveVisuals.size }; });
+  console.log('po průletu:', JSON.stringify(st2));
   await page.screenshot({ path: 'test/shots/5-level2.png' });
-  // 5. úroveň: víc lávy a krápníků — snímek z výšky nad jezírkem
-  await page.evaluate(() => { const g = window.__game, w = g.world; for (let i = 0; i < 3; i++) w.nextLevel();
-    g.buildLevel(); const pool = w.cave.pools[0]; w.player.invuln = 0.01;
-    if (pool) { w.player.pos = { x: pool.x, y: w.cave.floorY + 5, z: pool.z - 7 }; } g.snapCamera(); g.banner.hide(); });
+  // 5. úroveň: víc lávy — snímek z výšky nad jezírkem
+  await page.evaluate(() => { const g = window.__game, w = g.world; for (let i = 0; i < 3; i++) w.nextLevel(); });
+  await page.waitForFunction(() => window.__game.meshJobs.length === 0 && window.__game.world.level === 5, null, { timeout: 60000 });
+  await page.evaluate(() => { const g = window.__game, w = g.world, c = w.cur; const pool = c.pools[0]; w.player.invuln = 0.01;
+    if (pool) w.player.pos = { x: pool.x, y: c.floorY + 5, z: pool.z + c.oz - 7 }; g.snapCamera(); g.banner.hide(); });
   await page.keyboard.down('Space'); await page.waitForTimeout(1500); await page.keyboard.up('Space');
   await page.screenshot({ path: 'test/shots/6-level5-lava.png' });
+  const vis = await page.evaluate(() => ({ caves: window.__game.world.cave.caves.length, visuals: window.__game.caveVisuals.size }));
+  if (vis.visuals > 3) errors.push('staré jeskyně se nezahazují: ' + JSON.stringify(vis));
   if (st2.level !== 2 || st2.state !== 'playing') errors.push('přechod do 2. úrovně selhal: ' + JSON.stringify(st2));
 } finally {
   await browser.close();

@@ -87,12 +87,36 @@ test('boj: střela zabije příšeru, po zabití všech se otevřou dveře, prů
   assert.equal(w.score, CFG.score.kill);
   step(w, {}, 0.1);
   assert.ok(w.doorOpen);
-  w.player.pos = { x: w.cave.nx / 2, y: w.cave.floorY, z: w.cave.exitZ + 0.5 };
+  // plynulý přechod: průlet tunelem do další (už připravené) jeskyně
+  const c1 = w.cur, c2 = w.next;
+  assert.ok(c2 && c2.added, 'další jeskyně je napojená na řetěz');
+  assert.equal(c2.oz, c1.oz + c1.nz);
+  const tx = c1.tunnel.x0 + 2;
+  for (let z = c1.oz + c1.doorZ; z < c2.oz + c2.chamberZ0 + 2; z++)
+    assert.equal(w.cave.get(tx, c1.floorY + 1, z), 0, 'tunel průchozí v z=' + z);
+  w.player.pos = { x: tx, y: c1.floorY, z: c2.oz + c2.chamberZ0 + 2 };
   step(w, {}, 0.05);
-  assert.equal(w.state, 'cleared');
-  w.nextLevel();
+  assert.equal(w.state, 'playing', 'žádná pauza');
   assert.equal(w.level, 2);
+  assert.equal(w.cur, c2);
   assert.equal(w.enemies.length, 3 + 2, 've 2. úrovni 5 příšer');
+  assert.ok(w.enemies.every((e) => e.pos.z > c2.oz), 'příšery jsou v nové jeskyni');
+  assert.ok(w.score >= CFG.score.kill + CFG.score.levelBonus);
+  // stará jeskyně zmizí, až je hráč hluboko v nové, a vstup se zazdí
+  assert.ok(w.cave.caves.includes(c1));
+  w.player.pos = { x: tx, y: c2.floorY, z: c2.oz + c2.chamberZ0 + 20 };
+  step(w, {}, 0.05);
+  assert.ok(!w.cave.caves.includes(c1), 'stará jeskyně zahozena');
+  assert.equal(w.cave.get(tx, c2.floorY + 1, c2.oz), 1, 'vstup zazděn');
+});
+
+test('další jeskyně se staví postupně na pozadí', () => {
+  const w = newWorld(3);
+  assert.ok(w.next && !w.next.added);
+  let steps = 0;
+  while (!w.next.added && steps < 5000) { w.buildStep(0); steps++; }
+  assert.ok(w.next.added && steps > 10, 'stavba po kouscích (' + steps + ' kroků)');
+  assert.ok(w.events.some((e) => e.type === 'caveReady'));
 });
 
 test('zásahy: kontakt s příšerou ubere život, pak chvíli nesmrtelnost, 0 životů = konec', () => {
@@ -172,6 +196,7 @@ test('láva: s úrovní roste, nikdy u startu, u východu ani pod kanystrem, max
     assert.ok(c.lavaCells <= floor * 0.3 + 1);
   }
   const w = new World(5); w.newGame(); w.nextLevel(); w.nextLevel(); w.nextLevel();
+  assert.ok(w.pickups.length > 0);
   for (const k of w.pickups)
     assert.equal(w.cave.get(Math.floor(k.pos.x), w.cave.floorY - 1, Math.floor(k.pos.z)), ROCK, 'kanystr není na lávě');
 });
@@ -180,7 +205,7 @@ test('láva: šlápnutí vezme život a vymrští hráče nahoru', () => {
   const w = new World(9); w.newGame();
   for (let i = 0; i < 4; i++) w.nextLevel();
   w.enemies.forEach((e) => { e.hp = 0; });
-  const c = w.cave;
+  const c = w.cur;
   let spot = null;
   for (let z = c.chamberZ0; z < c.chamberZ1 && !spot; z++)
     for (let x = 1; x < c.nx - 1 && !spot; x++)
@@ -188,7 +213,7 @@ test('láva: šlápnutí vezme život a vymrští hráče nahoru', () => {
           c.get(x, c.floorY - 1, z + 1) === LAVA && c.get(x + 1, c.floorY - 1, z + 1) === LAVA) spot = { x: x + 1, z: z + 1 };
   assert.ok(spot, 'v 5. úrovni je jezírko');
   w.player.invuln = 0;
-  w.player.pos = { x: spot.x, y: c.floorY + 0.5, z: spot.z };
+  w.player.pos = { x: spot.x, y: c.floorY + 0.5, z: spot.z + c.oz };
   w.player.vel = { x: 0, y: -2, z: 0 };
   const lives = w.player.lives;
   step(w, {}, 0.3);
@@ -198,9 +223,10 @@ test('láva: šlápnutí vezme život a vymrští hráče nahoru', () => {
 
 test('příšera za sloupem nestřílí, s výhledem ano', () => {
   const w = new World(21); w.newGame(); w.nextLevel();   // od 2. úrovně se střílí
-  const c = w.cave;
-  const col = c.pillars.find((p) => p.kind === 'sloup' && p.r > 1.5) || c.pillars.find((p) => p.kind === 'sloup');
-  assert.ok(col);
+  const c = w.cur;
+  const lc = c.pillars.find((p) => p.kind === 'sloup' && p.r > 1.5) || c.pillars.find((p) => p.kind === 'sloup');
+  assert.ok(lc, 've 2. úrovni je sloup');
+  const col = { ...lc, z: lc.z + c.oz };
   const e = w.enemies[0];
   w.enemies.slice(1).forEach((x) => { x.hp = 0; });
   Object.assign(e, { shooter: true, awake: true, speed: 0 });

@@ -1,22 +1,45 @@
 // Jeskyně jako mřížka kostek 1×1×1 m. Čistá logika bez three.js — testuje se v Node.
 //
-// Každá úroveň = jedna velká komora (protáhlá dutina se zvlněnými stěnami)
-// + tunel na konci, zatarasený dveřmi. Dveře zmizí, až padnou všichni nepřátelé.
+// Každá úroveň = jedna velká komora + tunel na konci, zatarasený dveřmi. Dveře
+// zmizí, až padnou všichni nepřátelé. Jeskyně se řadí za sebe podél osy z
+// (posun `oz`): výstupní tunel jedné plynule pokračuje vstupním tunelem další,
+// takže přechod do další úrovně je bez načítání (viz chain.js).
+//
+// Souřadnice uvnitř třídy jsou MÍSTNÍ (z od 0 do nz). Převod na svět: z + oz.
 import { makeRng, makeNoise3 } from './rng.js';
 import { CFG } from './config.js';
 
 export const AIR = 0, ROCK = 1, DOOR = 2, LAVA = 3;
 
 export class Cave {
-  constructor(level, seed = 1234) {
+  // opts.oz = posun ve světě, opts.entrance = vstupní tunel od začátku mřížky,
+  // opts.deferred = negenerovat hned; stavět postupně přes build() (bez záseku)
+  constructor(level, seed = 1234, opts = {}) {
     this.level = level;
+    this.oz = opts.oz || 0;
+    this.entrance = !!opts.entrance;
+    this.ready = false;
     ({ nx: this.nx, ny: this.ny, nz: this.nz } = CFG.cave);
     this.cells = new Uint8Array(this.nx * this.ny * this.nz).fill(ROCK);
     this.rng = makeRng(seed + level * 7919);
     this.noise = makeNoise3(seed + level * 104729);
     this.pillars = [];
     this.pools = [];
-    this.carve();
+    if (!opts.deferred) this.finish();
+  }
+
+  // dostaví jeskyni najednou (nebo dokončí rozestavěnou)
+  finish() {
+    if (!this._steps) this._steps = this.build();
+    while (!this._steps.next().done);
+    return this;
+  }
+
+  // postupná stavba: vrací false, dokud není hotovo; `budget` = kolik kroků
+  step(budget = 4) {
+    if (!this._steps) this._steps = this.build();
+    for (let i = 0; i < budget; i++) if (this._steps.next().done) return true;
+    return this.ready;
   }
 
   idx(x, y, z) { return x + this.nx * (y + this.ny * z); }
@@ -27,7 +50,7 @@ export class Cave {
   solidAt(px, py, pz) { return this.get(Math.floor(px), Math.floor(py), Math.floor(pz)) !== AIR; }
   lavaAt(px, py, pz) { return this.get(Math.floor(px), Math.floor(py), Math.floor(pz)) === LAVA; }
 
-  carve() {
+  *build() {
     const { nx, nz, noise } = this;
     const cx = nx / 2;
     this.floorY = 3;
@@ -45,6 +68,7 @@ export class Cave {
           const n = 0.22 * noise(x * 0.12, y * 0.12, z * 0.12);
           if (dx * dx + dy * dy < 1 + n) this.set(x, y, z, AIR);
         }
+        if (y % 12 === 11) yield;   // malé kroky kvůli plynulosti na Questu
       }
     }
     // rovná podlaha kousek nad dnem, ať se dá přistát
@@ -56,21 +80,31 @@ export class Cave {
     this.spawn = { x: cx, y: this.floorY + 0.01, z: this.chamberZ0 + 9 };
     const tx0 = Math.floor(cx) - 2;
     this.tunnel = { x0: tx0, x1: tx0 + 4, y0: this.floorY, y1: this.floorY + 4 };
+    yield;
     this.carvePillars();
+    yield;
     this.carveLava();
+    yield;
 
-    // výstupní tunel 4×4 do konce mřížky a dveře v jeho ústí
+    // výstupní tunel 4×4 až na úplný konec mřížky (navazuje na další jeskyni)
+    // a dveře v jeho ústí
     const ty0 = this.floorY;
-    for (let z = this.chamberZ1 - 4; z < nz - 1; z++)
+    for (let z = this.chamberZ1 - 4; z < nz; z++)
       for (let y = ty0; y < ty0 + 4; y++)
         for (let x = tx0; x < tx0 + 4; x++) this.set(x, y, z, AIR);
     this.doorZ = this.chamberZ1 + 1;
     for (let y = ty0; y < ty0 + 4; y++)
       for (let x = tx0; x < tx0 + 4; x++) this.set(x, y, this.doorZ, DOOR);
-    this.exitZ = nz - 3;     // proletí-li hráč sem, úroveň končí
+    this.exitZ = nz - 3;
+    // vstupní tunel od začátku mřížky do komory (pokračování tunelu předchozí jeskyně)
+    if (this.entrance)
+      for (let z = 0; z < this.chamberZ0 + 6; z++)
+        for (let y = ty0; y < ty0 + 4; y++)
+          for (let x = tx0; x < tx0 + 4; x++) this.set(x, y, z, AIR);
     // volno kolem startu i za zády (místo pro kameru)
     for (let z = this.chamberZ0 + 3; z <= this.spawn.z + 2; z++)
       this.ensureClear({ x: cx, y: this.floorY, z }, 2, 5);
+    this.ready = true;
   }
 
   // výška stropu nad podlahou v daném sloupci (první pevná kostka nad podlahou)

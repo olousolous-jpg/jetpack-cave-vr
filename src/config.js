@@ -21,9 +21,9 @@ export const CFG = {
     shootFromLevel: 2, shotSpeed: 7, shotEvery: [2.5, 4.5],
   },
   pickup: { fuel: 60, radius: 1.0 },
-  lava: { bounce: 9 },
+  lava: { bounce: 9 },              // vymrštění z lávy (m/s vzhůru)
   // rozměry jeskyně (m) a krápníky podle úrovně: 1. úroveň 5, pak ubývají, od 6. žádné
-  cave: { nx: 110, ny: 46, nz: 150, pillars: (level) => Math.max(0, 6 - level) },              // vymrštění z lávy (m/s vzhůru)
+  cave: { nx: 110, ny: 46, nz: 150, pillars: (level) => Math.max(0, 6 - level) },
   score: { kill: 100, levelBonus: 250, fuelBonusPerUnit: 1 },
   camera: { back: 4.2, up: 2.1, side: 0.75, followRate: 6, yawRate: 7, headHeight: 1.6 },
 };
