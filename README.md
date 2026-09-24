@@ -1,5 +1,7 @@
 # Jetpack Cave VR
 
+> Stav vývoje, rozhodnutí a jak navázat: [STAV.md](STAV.md)
+
 Kostičková jeskyně, jetpack na zádech a fialové příšery. WebXR hra pro **Meta
 Quest 3**, která běží přímo v prohlížeči. Nic se neinstaluje.
 
